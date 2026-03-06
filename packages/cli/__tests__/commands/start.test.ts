@@ -62,8 +62,17 @@ vi.mock("ora", () => ({
 vi.mock("@composio/ao-core", async (importOriginal) => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const actual = await importOriginal<typeof import("@composio/ao-core")>();
+  const normalizeOrchestratorSessionStrategy =
+    actual.normalizeOrchestratorSessionStrategy ??
+    ((strategy: string | undefined) => {
+      if (strategy === "kill-previous" || strategy === "delete-new") return "delete";
+      if (strategy === "ignore-new") return "ignore";
+      return strategy ?? "delete";
+    });
+
   return {
     ...actual,
+    normalizeOrchestratorSessionStrategy,
     loadConfig: (path?: string) => {
       if (path) return actual.loadConfig(path);
       return mockConfigRef.current;

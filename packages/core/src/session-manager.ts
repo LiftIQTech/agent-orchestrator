@@ -61,6 +61,7 @@ import {
   validateAndStoreOrigin,
 } from "./paths.js";
 import { asValidOpenCodeSessionId } from "./opencode-session-id.js";
+import { normalizeOrchestratorSessionStrategy } from "./orchestrator-session-strategy.js";
 
 const execFileAsync = promisify(execFile);
 const OPENCODE_DISCOVERY_TIMEOUT_MS = 2_000;
@@ -881,13 +882,9 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     }
 
     const sessionId = `${project.sessionPrefix}-orchestrator`;
-    const configuredStrategy = project.orchestratorSessionStrategy ?? "delete";
-    const orchestratorSessionStrategy =
-      configuredStrategy === "kill-previous" || configuredStrategy === "delete-new"
-        ? "delete"
-        : configuredStrategy === "ignore-new"
-          ? "ignore"
-          : configuredStrategy;
+    const orchestratorSessionStrategy = normalizeOrchestratorSessionStrategy(
+      project.orchestratorSessionStrategy,
+    );
 
     // Generate tmux name if using new architecture
     let tmuxName: string | undefined;

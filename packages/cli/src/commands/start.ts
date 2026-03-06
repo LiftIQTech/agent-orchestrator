@@ -24,6 +24,7 @@ import {
   isRepoAlreadyCloned,
   generateConfigFromUrl,
   configToYaml,
+  normalizeOrchestratorSessionStrategy,
   type OrchestratorConfig,
   type ProjectConfig,
   type ParsedRepoUrl,
@@ -42,14 +43,6 @@ import { cleanNextCache } from "../lib/dashboard-rebuild.js";
 import { preflight } from "../lib/preflight.js";
 
 const DEFAULT_PORT = 3000;
-
-function normalizeOrchestratorSessionStrategy(
-  strategy: ProjectConfig["orchestratorSessionStrategy"] | undefined,
-): "reuse" | "delete" | "ignore" {
-  if (strategy === "kill-previous" || strategy === "delete-new") return "delete";
-  if (strategy === "ignore-new") return "ignore";
-  return strategy ?? "delete";
-}
 
 // =============================================================================
 // HELPERS
