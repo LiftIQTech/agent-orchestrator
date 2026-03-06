@@ -1080,7 +1080,10 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
         const plugins = resolvePlugins(project, selectedAgentName);
         // Cap per-session enrichment at 2s — subprocess calls (tmux/ps) can be
         // slow under load. If we time out, session keeps its metadata values.
-        const enrichTimeout = new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+        let enrichTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        const enrichTimeout = new Promise<void>((resolve) => {
+          enrichTimeoutId = setTimeout(resolve, 2_000);
+        });
         const enrichPromise = ensureHandleAndEnrich(
           session,
           sessionName,
@@ -1089,7 +1092,13 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
           selectedAgentName,
           plugins,
         ).catch(() => {});
-        await Promise.race([enrichPromise, enrichTimeout]);
+        try {
+          await Promise.race([enrichPromise, enrichTimeout]);
+        } finally {
+          if (enrichTimeoutId) {
+            clearTimeout(enrichTimeoutId);
+          }
+        }
 
         return session;
       },
@@ -1316,7 +1325,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
         }
 
         const cleanupAgent = archived["agent"] ?? project.agent ?? config.defaults.agent;
-        const mappedOpenCodeSessionId = archived["opencodeSessionId"];
+        const mappedOpenCodeSessionId = asValidOpenCodeSessionId(archived["opencodeSessionId"]);
         if (cleanupAgent === "opencode" && archived["opencodeCleanedAt"]) {
           pushUnique(result.skipped, archivedId);
           continue;

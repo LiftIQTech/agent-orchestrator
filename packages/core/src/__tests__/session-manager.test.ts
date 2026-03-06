@@ -1639,6 +1639,31 @@ describe("cleanup", () => {
     expect(deleteLog).toContain("session delete ses_archived");
   });
 
+  it("skips invalid archived OpenCode session ids during cleanup", async () => {
+    const deleteLogPath = join(tmpDir, "opencode-delete-archived-invalid.log");
+    const mockBin = installMockOpencode("[]", deleteLogPath);
+    process.env.PATH = `${mockBin}:${originalPath ?? ""}`;
+
+    writeMetadata(sessionsDir, "app-8", {
+      worktree: "/tmp",
+      branch: "main",
+      status: "spawning",
+      project: "my-app",
+      agent: "opencode",
+      opencodeSessionId: "ses bad id",
+      runtimeHandle: JSON.stringify(makeHandle("rt-8")),
+    });
+    deleteMetadata(sessionsDir, "app-8", true);
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    const result = await sm.cleanup();
+
+    expect(result.killed).not.toContain("app-8");
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toContain("app-8");
+    expect(existsSync(deleteLogPath)).toBe(false);
+  });
+
   it("does not delete archived OpenCode sessions in cleanup dry-run", async () => {
     const deleteLogPath = join(tmpDir, "opencode-delete-archived-dry-run.log");
     const mockBin = installMockOpencode("[]", deleteLogPath);
