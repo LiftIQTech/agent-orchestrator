@@ -1195,9 +1195,10 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       }
     }
 
+    let didPurgeOpenCodeSession = false;
     if (options?.purgeOpenCode === true && cleanupAgent === "opencode") {
       const mappedOpenCodeSessionId =
-        raw["opencodeSessionId"] ??
+        asValidOpenCodeSessionId(raw["opencodeSessionId"]) ??
         (await discoverOpenCodeSessionIdByTitle(
           sessionId,
           OPENCODE_INTERACTIVE_DISCOVERY_TIMEOUT_MS,
@@ -1206,10 +1207,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       if (mappedOpenCodeSessionId) {
         try {
           await deleteOpenCodeSession(mappedOpenCodeSessionId);
-          updateMetadata(sessionsDir, sessionId, {
-            opencodeSessionId: "",
-            opencodeCleanedAt: new Date().toISOString(),
-          });
+          didPurgeOpenCodeSession = true;
         } catch {
           void 0;
         }
@@ -1218,6 +1216,9 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
 
     // Archive metadata
     deleteMetadata(sessionsDir, sessionId, true);
+    if (didPurgeOpenCodeSession) {
+      markArchivedOpenCodeCleanup(sessionsDir, sessionId);
+    }
   }
 
   async function cleanup(
