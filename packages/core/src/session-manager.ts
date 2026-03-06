@@ -552,7 +552,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       sessionId,
       projectConfig: project,
       issueId: spawnConfig.issueId,
-      prompt: composedPrompt ?? spawnConfig.prompt,
+      prompt: composedPrompt,
       permissions: project.agentConfig?.permissions,
       model: project.agentConfig?.model,
     };

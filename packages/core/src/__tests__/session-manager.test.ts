@@ -582,7 +582,7 @@ describe("spawn", () => {
     expect(mockRuntime.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("does not send prompt post-launch when no prompt is provided", async () => {
+  it("sends AO guidance post-launch even when no explicit prompt is provided", async () => {
     vi.useFakeTimers();
     const postLaunchAgent = {
       ...mockAgent,
@@ -599,11 +599,14 @@ describe("spawn", () => {
     };
 
     const sm = createSessionManager({ config, registry: registryWithPostLaunch });
-    const spawnPromise = sm.spawn({ projectId: "my-app" }); // No prompt
+    const spawnPromise = sm.spawn({ projectId: "my-app" });
     await vi.advanceTimersByTimeAsync(5_000);
     await spawnPromise;
 
-    expect(mockRuntime.sendMessage).not.toHaveBeenCalled();
+    expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.any(String) }),
+      expect.stringContaining("ao session claim-pr"),
+    );
     vi.useRealTimers();
   });
 
