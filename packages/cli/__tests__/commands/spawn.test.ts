@@ -562,6 +562,67 @@ describe("spawn pre-flight checks", () => {
     expect(mockSessionManager.spawn).not.toHaveBeenCalled();
   });
 
+
+  it("handles tracker+scm github preflight when claiming during spawn", async () => {
+    const fakeSession: Session = {
+      id: "app-1",
+      projectId: "my-app",
+      status: "spawning",
+      activity: null,
+      branch: null,
+      issueId: null,
+      pr: null,
+      workspacePath: "/tmp/wt",
+      runtimeHandle: { id: "hash-app-1", runtimeName: "tmux", data: {} },
+      agentInfo: null,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      metadata: {},
+    };
+
+    mockSessionManager.spawn.mockResolvedValue(fakeSession);
+    mockSessionManager.claimPR.mockResolvedValue({
+      sessionId: "app-1",
+      projectId: "my-app",
+      pr: {
+        number: 123,
+        url: "https://github.com/org/repo/pull/123",
+        title: "Existing PR",
+        owner: "org",
+        repo: "repo",
+        branch: "feat/claimed-pr",
+        baseBranch: "main",
+        isDraft: false,
+      },
+      branchChanged: true,
+      githubAssigned: false,
+      takenOverFrom: [],
+    });
+
+    const projects = (mockConfigRef.current as Record<string, unknown>).projects as Record<
+      string,
+      Record<string, unknown>
+    >;
+    projects["my-app"].tracker = { plugin: "github" };
+    projects["my-app"].scm = { plugin: "github" };
+
+    mockExec
+      .mockResolvedValueOnce({ stdout: "tmux 3.3a", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "gh version 2.40", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "Logged in", stderr: "" });
+
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--claim-pr", "123"]);
+
+    expect(mockExec).toHaveBeenCalledWith("tmux", ["-V"]);
+    const ghCalls = mockExec.mock.calls.filter(([command]) => command === "gh");
+    expect(ghCalls).toHaveLength(2);
+    expect(mockSessionManager.spawn).toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).toHaveBeenCalledWith("app-1", "123", {
+      assignOnGithub: undefined,
+      takeover: undefined,
+    });
+  });
+
   it("skips gh auth check when tracker is not github", async () => {
     const fakeSession: Session = {
       id: "app-1",

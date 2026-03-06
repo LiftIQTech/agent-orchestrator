@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createLifecycleManager } from "../lifecycle-manager.js";
+import { createSessionManager } from "../session-manager.js";
 import { writeMetadata, readMetadataRaw } from "../metadata.js";
 import { getSessionsDir, getProjectBaseDir } from "../paths.js";
 import type {
@@ -477,9 +478,6 @@ describe("check (single session)", () => {
       }),
     };
 
-    const session = makeSession({ status: "working", metadata: { prAutoDetect: "off" } });
-    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
-
     writeMetadata(sessionsDir, "app-1", {
       worktree: "/tmp",
       branch: "feat/test",
@@ -487,6 +485,15 @@ describe("check (single session)", () => {
       project: "my-app",
       prAutoDetect: "off",
     });
+
+    const realSessionManager = createSessionManager({
+      config,
+      registry: registryWithSCM,
+    });
+    const session = await realSessionManager.get("app-1");
+
+    expect(session).not.toBeNull();
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
 
     const lm = createLifecycleManager({
       config,

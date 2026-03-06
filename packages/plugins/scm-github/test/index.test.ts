@@ -148,6 +148,12 @@ describe("scm-github plugin", () => {
       await expect(scm.detectPR(makeSession(), badProject)).rejects.toThrow("Invalid repo format");
     });
 
+
+    it("rejects repo strings with extra path segments", async () => {
+      const badProject = { ...project, repo: "acme/repo/extra" };
+      await expect(scm.detectPR(makeSession(), badProject)).rejects.toThrow("Invalid repo format");
+    });
+
     it("detects draft PRs", async () => {
       mockGh([
         {

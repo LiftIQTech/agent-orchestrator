@@ -28,11 +28,10 @@ async function runSpawnPreflight(
   if (runtime === "tmux") {
     await preflight.checkTmux();
   }
-  if (project?.tracker?.plugin === "github") {
-    await preflight.checkGhAuth();
-    return;
-  }
-  if (options?.claimPr && project?.scm?.plugin === "github") {
+  const needsGitHubAuth =
+    project?.tracker?.plugin === "github" ||
+    (options?.claimPr && project?.scm?.plugin === "github");
+  if (needsGitHubAuth) {
     await preflight.checkGhAuth();
   }
 }

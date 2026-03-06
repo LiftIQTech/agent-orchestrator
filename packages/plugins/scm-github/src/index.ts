@@ -44,48 +44,37 @@ const BOT_AUTHORS = new Set([
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function gh(args: string[]): Promise<string> {
+type ExecCommand = "gh" | "git";
+
+async function execCli(
+  command: ExecCommand,
+  args: string[],
+  options?: { cwd?: string },
+): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("gh", args, {
+    const { stdout } = await execFileAsync(command, args, {
+      cwd: options?.cwd,
       maxBuffer: 10 * 1024 * 1024,
       timeout: 30_000,
     });
     return stdout.trim();
   } catch (err) {
-    throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
+    throw new Error(`${command} ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
       cause: err,
     });
   }
+}
+
+async function gh(args: string[]): Promise<string> {
+  return execCli("gh", args);
 }
 
 async function ghInDir(args: string[], cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("gh", args, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30_000,
-    });
-    return stdout.trim();
-  } catch (err) {
-    throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
-      cause: err,
-    });
-  }
+  return execCli("gh", args, { cwd });
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30_000,
-    });
-    return stdout.trim();
-  } catch (err) {
-    throw new Error(`git ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
-      cause: err,
-    });
-  }
+  return execCli("git", args, { cwd });
 }
 
 function repoFlag(pr: PRInfo): string {
@@ -98,11 +87,12 @@ function parseDate(val: string | undefined | null): Date {
   return isNaN(d.getTime()) ? new Date(0) : d;
 }
 
-function assertProjectRepo(projectRepo: string): void {
-  const [owner, repo] = projectRepo.split("/");
-  if (!owner || !repo) {
+function parseProjectRepo(projectRepo: string): [string, string] {
+  const parts = projectRepo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
     throw new Error(`Invalid repo format "${projectRepo}", expected "owner/repo"`);
   }
+  return [parts[0], parts[1]];
 }
 
 function prInfoFromView(
@@ -116,8 +106,7 @@ function prInfoFromView(
   },
   projectRepo: string,
 ): PRInfo {
-  assertProjectRepo(projectRepo);
-  const [owner, repo] = projectRepo.split("/");
+  const [owner, repo] = parseProjectRepo(projectRepo);
 
   return {
     number: data.number,
@@ -141,7 +130,7 @@ function createGitHubSCM(): SCM {
 
     async detectPR(session: Session, project: ProjectConfig): Promise<PRInfo | null> {
       if (!session.branch) return null;
-      assertProjectRepo(project.repo);
+      parseProjectRepo(project.repo);
 
       try {
         const raw = await gh([

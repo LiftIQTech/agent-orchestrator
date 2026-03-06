@@ -954,6 +954,23 @@ describe("get", () => {
     const sm = createSessionManager({ config, registry: mockRegistry });
     expect(await sm.get("nonexistent")).toBeNull();
   });
+
+
+  it("preserves arbitrary metadata flags on loaded sessions", async () => {
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      prAutoDetect: "off",
+    });
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    const session = await sm.get("app-1");
+
+    expect(session).not.toBeNull();
+    expect(session!.metadata["prAutoDetect"]).toBe("off");
+  });
 });
 
 describe("kill", () => {
