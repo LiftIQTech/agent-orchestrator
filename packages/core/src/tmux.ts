@@ -6,6 +6,12 @@
 
 import { execFile } from "node:child_process";
 
+const PASTE_BUFFER_THRESHOLD = 200;
+const BASE_PASTE_DELAY_MS = 1000;
+const PASTE_DELAY_PER_1K_CHARS_MS = 500;
+const ENTER_RETRY_DELAYS_MS = [500, 1000, 1500] as const;
+const CAPTURE_PANE_LINES = 40;
+
 /** Run a tmux command and return stdout. */
 function tmux(...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -127,12 +133,14 @@ export async function sendKeys(
   text: string,
   pressEnter = true,
 ): Promise<void> {
+  const usesPasteBuffer = text.includes("\n") || text.length > PASTE_BUFFER_THRESHOLD;
+
   // Clear any partial input first (matches bash reference scripts)
   await tmux("send-keys", "-t", sessionName, "Escape");
   // Small delay to ensure Escape is processed before pasting
   await new Promise((resolve) => setTimeout(resolve, 100));
 
-  if (text.includes("\n") || text.length > 200) {
+  if (usesPasteBuffer) {
     // Use a named buffer to avoid global paste buffer race conditions
     const { writeFileSync, unlinkSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
@@ -160,13 +168,30 @@ export async function sendKeys(
   }
 
   if (pressEnter) {
-    // Delay for paste to complete before sending Enter
-    // Higher delay needed when using paste-buffer to ensure tmux processes the paste
-    // before receiving the Enter keystroke (especially with Claude permission prompts)
-    if (text.includes("\n") || text.length > 200) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (!usesPasteBuffer) {
+      await tmux("send-keys", "-t", sessionName, "Enter");
+      return;
     }
+
+    // For large paste-buffer payloads, allow enough time for terminal input handling.
+    const adaptivePasteDelayMs = BASE_PASTE_DELAY_MS + (text.length / 1000) * PASTE_DELAY_PER_1K_CHARS_MS;
+    const baselinePane = await capturePane(sessionName, CAPTURE_PANE_LINES).catch(() => "");
+
+    await new Promise((resolve) => setTimeout(resolve, adaptivePasteDelayMs));
     await tmux("send-keys", "-t", sessionName, "Enter");
+
+    let previousPane = baselinePane;
+    for (const retryDelayMs of ENTER_RETRY_DELAYS_MS) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      const currentPane = await capturePane(sessionName, CAPTURE_PANE_LINES).catch(() => "");
+
+      if (currentPane.trim() !== previousPane.trim()) {
+        return;
+      }
+
+      await tmux("send-keys", "-t", sessionName, "Enter");
+      previousPane = currentPane;
+    }
   }
 }
 
