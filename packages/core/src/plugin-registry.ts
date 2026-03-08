@@ -63,7 +63,11 @@ function extractPluginConfig(
     for (const [notifierName, notifierConfig] of Object.entries(config.notifiers ?? {})) {
       if (!notifierConfig || typeof notifierConfig !== "object") continue;
       const configuredPlugin = (notifierConfig as Record<string, unknown>)["plugin"];
-      if (notifierName === name || configuredPlugin === name) {
+      const hasExplicitPlugin = typeof configuredPlugin === "string" && configuredPlugin.length > 0;
+      const matches = hasExplicitPlugin
+        ? configuredPlugin === name
+        : notifierName === name;
+      if (matches) {
         const { plugin: _plugin, ...rest } = notifierConfig as Record<string, unknown>;
         return rest;
       }
