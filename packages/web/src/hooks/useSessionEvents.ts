@@ -2,6 +2,7 @@
 
 import { useEffect, useReducer } from "react";
 import type { DashboardSession, SSESnapshotEvent } from "@/lib/types";
+import { apiPath } from "@/lib/api-path";
 
 type Action =
   | { type: "reset"; sessions: DashboardSession[] }
@@ -25,7 +26,12 @@ function reducer(state: DashboardSession[], action: Action): DashboardSession[] 
           return s;
         }
         changed = true;
-        return { ...s, status: patch.status, activity: patch.activity, lastActivityAt: patch.lastActivityAt };
+        return {
+          ...s,
+          status: patch.status,
+          activity: patch.activity,
+          lastActivityAt: patch.lastActivityAt,
+        };
       });
       return changed ? next : state;
     }
@@ -41,7 +47,54 @@ export function useSessionEvents(initialSessions: DashboardSession[]): Dashboard
   }, [initialSessions]);
 
   useEffect(() => {
-    const es = new EventSource("/api/events");
+    const es = new EventSource(apiPath("/api/events"));
+
+    es.onmessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data as string) as { type: string };
+        if (data.type === "snapshot") {
+          const snapshot = data as SSESnapshotEvent;
+          dispatch({ type: "snapshot", patches: snapshot.sessions });
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    es.onerror = () => {
+      // EventSource auto-reconnects; nothing to do here
+    };
+
+    return () => {
+      es.close();
+    };
+  }, []);
+
+  return sessions;
+}
+        changed = true;
+        return {
+          ...s,
+          status: patch.status,
+          activity: patch.activity,
+          lastActivityAt: patch.lastActivityAt,
+        };
+      });
+      return changed ? next : state;
+    }
+  }
+}
+
+export function useSessionEvents(initialSessions: DashboardSession[]): DashboardSession[] {
+  const [sessions, dispatch] = useReducer(reducer, initialSessions);
+
+  // Reset state when server-rendered props change (e.g. full page refresh)
+  useEffect(() => {
+    dispatch({ type: "reset", sessions: initialSessions });
+  }, [initialSessions]);
+
+  useEffect(() => {
+    const es = new EventSource(apiPath("/api/events"));
 
     es.onmessage = (event: MessageEvent) => {
       try {

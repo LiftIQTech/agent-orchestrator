@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { CICheckList } from "./CIBadge";
 import { DirectTerminal } from "./DirectTerminal";
 import { ActivityDot } from "./ActivityDot";
+import { apiPath } from "@/lib/api-path";
 
 interface OrchestratorZones {
   merge: number;
@@ -89,7 +90,7 @@ async function askAgentToFix(
   try {
     const { title, description } = cleanBugbotComment(comment.body);
     const message = `Please address this review comment:\n\nFile: ${comment.path}\nComment: ${title}\nDescription: ${description}\n\nComment URL: ${comment.url}\n\nAfter fixing, mark the comment as resolved at ${comment.url}`;
-    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/message`, {
+    const res = await fetch(apiPath(`/api/sessions/${encodeURIComponent(sessionId)}/message`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
