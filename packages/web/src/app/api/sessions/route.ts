@@ -8,6 +8,7 @@ import {
   enrichSessionsMetadata,
   computeStats,
 } from "@/lib/serialize";
+import { matchesProject } from "@/lib/project-utils";
 
 const METADATA_ENRICH_TIMEOUT_MS = 3_000;
 const PR_ENRICH_TIMEOUT_MS = 4_000;
@@ -26,21 +27,6 @@ async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Prom
       clearTimeout(timeoutId);
     }
   }
-}
-
-/**
- * Check if a session belongs to a specific project.
- * Matches by projectId or sessionPrefix (same logic as resolveProject).
- */
-function matchesProject(
-  session: { id: string; projectId: string },
-  projectId: string,
-  projects: Record<string, { sessionPrefix?: string }>,
-): boolean {
-  if (session.projectId === projectId) return true;
-  const project = projects[projectId];
-  if (project?.sessionPrefix && session.id.startsWith(project.sessionPrefix)) return true;
-  return false;
 }
 
 /** GET /api/sessions — List sessions with full state

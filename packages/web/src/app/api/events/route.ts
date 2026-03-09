@@ -1,20 +1,10 @@
 import { getServices } from "@/lib/services";
 import { sessionToDashboard } from "@/lib/serialize";
 import { getAttentionLevel } from "@/lib/types";
+import { matchesProject } from "@/lib/project-utils";
 import type { Session } from "@composio/ao-core";
 
 export const dynamic = "force-dynamic";
-
-function matchesProject(
-  session: { id: string; projectId: string },
-  projectId: string,
-  projects: Record<string, { sessionPrefix?: string }>,
-): boolean {
-  if (session.projectId === projectId) return true;
-  const project = projects[projectId];
-  if (project?.sessionPrefix && session.id.startsWith(project.sessionPrefix)) return true;
-  return false;
-}
 
 /** GET /api/events — SSE stream for real-time lifecycle events
  * Query params:

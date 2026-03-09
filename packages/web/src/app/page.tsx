@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+
+export const dynamic = "force-dynamic";
 import { Dashboard } from "@/components/Dashboard";
 import type { DashboardSession } from "@/lib/types";
 import { getServices, getSCM } from "@/lib/services";
@@ -11,20 +13,7 @@ import {
 } from "@/lib/serialize";
 import { prCache, prCacheKey } from "@/lib/cache";
 import { getPrimaryProjectId, getProjectName } from "@/lib/project-name";
-import type { OrchestratorConfig } from "@composio/ao-core";
-
-export const dynamic = "force-dynamic";
-
-function matchesProject(
-  session: { id: string; projectId: string },
-  projectId: string,
-  projects: OrchestratorConfig["projects"],
-): boolean {
-  if (session.projectId === projectId) return true;
-  const project = projects[projectId];
-  if (project?.sessionPrefix && session.id.startsWith(project.sessionPrefix)) return true;
-  return false;
-}
+import { matchesProject } from "@/lib/project-utils";
 
 export async function generateMetadata(): Promise<Metadata> {
   const projectName = getProjectName();
@@ -119,12 +108,15 @@ export default async function Home() {
     orchestratorId = null;
   }
 
+  const projectName = getProjectName();
+
   return (
     <Dashboard
       initialSessions={sessions}
       stats={computeStats(sessions)}
       orchestratorId={orchestratorId}
-      projectName={projectId}
+      projectId={projectId}
+      projectName={projectName}
     />
   );
 }

@@ -19,13 +19,20 @@ interface DashboardProps {
   initialSessions: DashboardSession[];
   stats: DashboardStats;
   orchestratorId?: string | null;
+  projectId?: string;
   projectName?: string;
 }
 
 const KANBAN_LEVELS = ["working", "pending", "review", "respond", "merge"] as const;
 
-export function Dashboard({ initialSessions, stats, orchestratorId, projectName }: DashboardProps) {
-  const sessions = useSessionEvents(initialSessions, projectName);
+export function Dashboard({
+  initialSessions,
+  stats,
+  orchestratorId,
+  projectId,
+  projectName,
+}: DashboardProps) {
+  const sessions = useSessionEvents(initialSessions, projectId);
   const [rateLimitDismissed, setRateLimitDismissed] = useState(false);
   const grouped = useMemo(() => {
     const zones: Record<AttentionLevel, DashboardSession[]> = {
