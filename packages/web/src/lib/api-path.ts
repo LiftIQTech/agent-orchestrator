@@ -1,13 +1,7 @@
-/**
- * Utility for prepending basePath to API routes.
- *
- * Next.js only auto-prefixes basePath for next/link and next/router;
- * Raw `fetch()` and `EventSource` calls require manual prepending of this basePath.
- */
 export function getBasePath(): string {
   const raw = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   if (!raw) return "";
-  const stripped = raw.replace(/^\/+|\/+$/g, "");
+  const stripped = raw.trim().replace(/^\/+|\/+$/g, "");
   return stripped ? `/${stripped}` : "";
 }
 
