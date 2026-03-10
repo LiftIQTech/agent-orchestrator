@@ -1,0 +1,82 @@
+# Webhook Notifier Configuration
+# Shows how to configure generic HTTP webhook notifications
+# Use this to integrate with any service that accepts webhook payloads
+
+dataDir: ~/.agent-orchestrator
+worktreeDir: ~/.worktrees
+
+defaults:
+  runtime: tmux
+  agent: claude-code
+  workspace: worktree
+  notifiers: [my-webhook]
+
+projects:
+  my-app:
+    name: My App
+    repo: org/my-app
+    path: ~/my-app
+    defaultBranch: main
+    sessionPrefix: app
+
+# Generic webhook notifier
+# Sends POST requests with JSON payloads to your endpoint
+notifiers:
+  my-webhook:
+    plugin: webhook
+    url: ${WEBHOOK_URL} # Required: endpoint URL
+    headers: # Optional: custom headers
+      Authorization: "Bearer ${WEBHOOK_TOKEN}"
+      X-Custom-Header: "custom-value"
+    retries: 2 # Optional: retry count (default: 2)
+    retryDelayMs: 1000 # Optional: initial retry delay (default: 1000)
+
+# Route notifications by priority
+notificationRouting:
+  urgent: [my-webhook] # agent stuck, needs input, errored
+  action: [my-webhook] # PR ready to merge
+  warning: [my-webhook] # auto-fix failed
+  info: [my-webhook] # summary, all done
+
+
+# Webhook Payload Formats
+# -----------------------
+# Your endpoint will receive POST requests with JSON body:
+#
+# Notification (notify):
+# {
+#   "type": "notification",
+#   "event": {
+#     "id": "uuid",
+#     "type": "ci.failing",
+#     "priority": "action",
+#     "sessionId": "app-1",
+#     "projectId": "my-app",
+#     "timestamp": "2025-06-15T12:00:00.000Z",
+#     "message": "CI check failed on app-1",
+#     "data": { ... }
+#   }
+# }
+#
+# Notification with actions (notifyWithActions):
+# {
+#   "type": "notification_with_actions",
+#   "event": { ... },
+#   "actions": [
+#     { "label": "Merge", "url": "https://github.com/..." },
+#     { "label": "Kill", "callbackEndpoint": "/api/kill/app-1" }
+#   ]
+# }
+#
+# Plain message (post):
+# {
+#   "type": "message",
+#   "message": "All sessions complete",
+#   "context": { "projectId": "my-app" }
+# }
+#
+# Retry Behavior
+# --------------
+# - Retries on: 429 (Too Many Requests), 5xx server errors, network errors
+# - Does NOT retry on: 400, 401, 403, 404, and other 4xx client errors
+# - Uses exponential backoff: delay * 2^attempt
