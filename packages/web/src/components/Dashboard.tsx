@@ -113,6 +113,10 @@ export function Dashboard({
     () => sessions.some((s) => s.pr && isPRRateLimited(s.pr)),
     [sessions],
   );
+  const resumeAtLabel = useMemo(() => {
+    if (!globalPause) return null;
+    return new Date(globalPause.pausedUntil).toLocaleString();
+  }, [globalPause]);
 
   return (
     <div className="flex h-screen">
@@ -162,6 +166,9 @@ export function Dashboard({
             </svg>
             <span className="flex-1">
               <strong>Orchestrator paused:</strong> {globalPause.reason}
+              {resumeAtLabel && (
+                <span className="ml-2 opacity-75">Resume after {resumeAtLabel}</span>
+              )}
               {globalPause.sourceSessionId && (
                 <span className="ml-2 opacity-75">(Source: {globalPause.sourceSessionId})</span>
               )}

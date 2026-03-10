@@ -78,6 +78,21 @@ describe("Dashboard globalPause banner", () => {
     expect(screen.getByText(/Custom provider limit exceeded/)).toBeInTheDocument();
   });
 
+  it("shows the automatic resume time", () => {
+    const sessions = [makeSession()];
+    const globalPause = makeGlobalPause({ pausedUntil: "2026-03-10T12:30:00.000Z" });
+
+    render(
+      <Dashboard
+        initialSessions={sessions}
+        stats={defaultStats}
+        initialGlobalPause={globalPause}
+      />,
+    );
+
+    expect(screen.getByText(/Resume after/)).toBeInTheDocument();
+  });
+
   it("displays source session ID when provided", () => {
     const sessions = [makeSession()];
     const globalPause = makeGlobalPause({ sourceSessionId: "my-worker-42" });
