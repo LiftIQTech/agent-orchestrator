@@ -668,5 +668,50 @@ describe("API Routes", () => {
       const res = await webhookPOST(req);
       expect(res.status).toBe(404);
     });
+
+    it("returns 413 when content-length exceeds configured maxBodyBytes", async () => {
+      const originalWebhook = mockConfig.projects["my-app"]?.scm?.webhook;
+      if (mockConfig.projects["my-app"]?.scm) {
+        mockConfig.projects["my-app"].scm.webhook = { maxBodyBytes: 1 };
+      }
+
+      const req = makeRequest("/api/webhooks/github", {
+        method: "POST",
+        body: JSON.stringify({ any: "payload" }),
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": "50",
+          "x-github-event": "pull_request",
+        },
+      });
+
+      const res = await webhookPOST(req);
+      expect(res.status).toBe(413);
+
+      if (mockConfig.projects["my-app"]?.scm) {
+        mockConfig.projects["my-app"].scm.webhook = originalWebhook;
+      }
+    });
+
+    it("continues after parse errors and still returns 202", async () => {
+      (mockSCM.parseWebhook as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error("Invalid webhook payload"),
+      );
+
+      const req = makeRequest("/api/webhooks/github", {
+        method: "POST",
+        body: JSON.stringify({ any: "payload" }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-github-event": "pull_request",
+        },
+      });
+
+      const res = await webhookPOST(req);
+      expect(res.status).toBe(202);
+      const data = await res.json();
+      expect(Array.isArray(data.parseErrors)).toBe(true);
+      expect(data.parseErrors[0]).toMatch(/Invalid webhook payload/);
+    });
   });
 });

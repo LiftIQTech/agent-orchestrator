@@ -11,15 +11,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const rawBody = new Uint8Array(await request.arrayBuffer());
-    const body = new TextDecoder().decode(rawBody);
     const services = await getServices();
-    const webhookRequest = buildWebhookRequest(request, body, rawBody);
-    const candidates = findWebhookProjects(
-      services.config,
-      services.registry,
-      new URL(request.url).pathname,
-    );
+    const path = new URL(request.url).pathname;
+    const candidates = findWebhookProjects(services.config, services.registry, path);
 
     if (candidates.length === 0) {
       return NextResponse.json(
@@ -28,11 +22,34 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    const rawContentLength = request.headers.get("content-length");
+    const contentLength = rawContentLength ? Number(rawContentLength) : NaN;
+    const configuredMaxBodyBytes = candidates
+      .map((candidate) => candidate.project.scm?.webhook?.maxBodyBytes)
+      .filter((value): value is number => typeof value === "number");
+    const maxBodyBytes =
+      configuredMaxBodyBytes.length > 0 ? Math.min(...configuredMaxBodyBytes) : undefined;
+    if (
+      maxBodyBytes !== undefined &&
+      Number.isFinite(contentLength) &&
+      contentLength > maxBodyBytes
+    ) {
+      return NextResponse.json(
+        { error: "Webhook payload exceeds configured maxBodyBytes" },
+        { status: 413 },
+      );
+    }
+
+    const rawBody = new Uint8Array(await request.arrayBuffer());
+    const body = new TextDecoder().decode(rawBody);
+    const webhookRequest = buildWebhookRequest(request, body, rawBody);
+
     const sessions = await services.sessionManager.list();
     const sessionIds = new Set<string>();
     const projectIds = new Set<string>();
     let verified = false;
     const errors: string[] = [];
+    const parseErrors: string[] = [];
 
     for (const candidate of candidates) {
       const verification = await candidate.scm.verifyWebhook?.(webhookRequest, candidate.project);
@@ -46,10 +63,8 @@ export async function POST(request: Request): Promise<Response> {
       try {
         event = await candidate.scm.parseWebhook?.(webhookRequest, candidate.project);
       } catch (err) {
-        return NextResponse.json(
-          { error: err instanceof Error ? err.message : "Invalid webhook payload" },
-          { status: 400 },
-        );
+        parseErrors.push(err instanceof Error ? err.message : "Invalid webhook payload");
+        continue;
       }
 
       if (!event || !eventMatchesProject(event, candidate.project)) {
@@ -82,6 +97,7 @@ export async function POST(request: Request): Promise<Response> {
         projectIds: [...projectIds],
         sessionIds: [...sessionIds],
         matchedSessions: sessionIds.size,
+        parseErrors,
       },
       { status: 202 },
     );
