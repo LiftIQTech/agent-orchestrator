@@ -233,7 +233,7 @@ export function create(config?: Record<string, unknown>): Workspace {
           await git(repoPath, "worktree", "add", "-b", cfg.branch, workspacePath, remoteBranch);
         } catch {
           // Last resort: create from default branch
-          const baseRef = `origin/${cfg.project.defaultBranch}`;
+      const baseRef = `origin/${cfg.baseBranch ?? cfg.project.defaultBranch}`;
           await git(repoPath, "worktree", "add", "-b", cfg.branch, workspacePath, baseRef);
         }
       }

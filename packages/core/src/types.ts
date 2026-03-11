@@ -186,6 +186,8 @@ export interface SessionSpawnConfig {
   lineage?: string[];
   /** Decomposition context — sibling task descriptions (passed to prompt builder) */
   siblings?: string[];
+  /** Base branch to create feature branch from (default: project's defaultBranch) */
+  baseBranch?: string;
 }
 
 /** Config for creating an orchestrator session */
@@ -426,6 +428,8 @@ export interface WorkspaceCreateConfig {
   project: ProjectConfig;
   sessionId: SessionId;
   branch: string;
+  /** Base branch to create feature branch from (default: project's defaultBranch) */
+  baseBranch?: string;
 }
 
 export interface WorkspaceInfo {
