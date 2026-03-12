@@ -12,6 +12,7 @@ const {
   scmPlugin,
   trackerGithubPlugin,
   trackerLinearPlugin,
+  mockStartWorkflow,
 } = vi.hoisted(() => {
   const mockLoadConfig = vi.fn();
   const mockRegister = vi.fn();
@@ -23,6 +24,7 @@ const {
     loadBuiltins: vi.fn(),
     loadFromConfig: vi.fn(),
   };
+  const mockStartWorkflow = vi.fn();
 
   return {
     mockLoadConfig,
@@ -36,6 +38,7 @@ const {
     scmPlugin: { manifest: { name: "github" } },
     trackerGithubPlugin: { manifest: { name: "github" } },
     trackerLinearPlugin: { manifest: { name: "linear" } },
+    mockStartWorkflow,
   };
 });
 
@@ -55,6 +58,9 @@ vi.mock("@composio/ao-core", () => ({
   formatPlanTree: vi.fn(),
   DEFAULT_DECOMPOSER_CONFIG: {},
   TERMINAL_STATUSES: new Set(["merged", "killed"]) as ReadonlySet<string>,
+  createWorkflowManager: () => ({
+    startWorkflow: mockStartWorkflow,
+  }),
 }));
 
 vi.mock("@composio/ao-plugin-runtime-tmux", () => ({ default: tmuxPlugin }));
@@ -123,6 +129,7 @@ describe("pollBacklog", () => {
     mockUpdateIssue.mockClear();
     mockListIssues.mockClear();
     mockSpawn.mockClear();
+    mockStartWorkflow.mockReset();
 
     mockLoadConfig.mockReturnValue({
       configPath: "/tmp/agent-orchestrator.yaml",
@@ -196,6 +203,62 @@ describe("pollBacklog", () => {
         labels: ["agent:in-progress"],
         removeLabels: ["agent:backlog"],
         comment: "Claimed by agent orchestrator — session spawned.",
+      },
+      expect.objectContaining({ tracker: { plugin: "github" } }),
+    );
+  });
+
+  it("starts architect workflow when project workflow is enabled", async () => {
+    mockLoadConfig.mockReturnValue({
+      configPath: "/tmp/agent-orchestrator.yaml",
+      port: 3000,
+      readyThresholdMs: 300_000,
+      defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
+      projects: {
+        "test-project": {
+          path: "/tmp/test-project",
+          tracker: { plugin: "github" },
+          workflow: { enabled: true },
+        },
+      },
+      notifiers: {},
+      notificationRouting: { urgent: [], action: [], warning: [], info: [] },
+      reactions: {},
+    });
+
+    mockListIssues.mockResolvedValue([
+      {
+        id: "641",
+        title: "Workflow issue",
+        description: "Use architect workflow",
+        url: "https://github.com/test/test/issues/641",
+        state: "open",
+        labels: ["agent:backlog"],
+      },
+    ]);
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { pollBacklog } = await import("../lib/services");
+    await pollBacklog();
+
+    expect(mockStartWorkflow).toHaveBeenCalledWith("test-project", "641");
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockUpdateIssue).toHaveBeenCalledWith(
+      "641",
+      {
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:backlog"],
+        comment: "Claimed by agent orchestrator — architect workflow started.",
       },
       expect.objectContaining({ tracker: { plugin: "github" } }),
     );

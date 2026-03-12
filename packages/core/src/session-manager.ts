@@ -704,7 +704,10 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
     // Create workspace (if workspace plugin is available)
     let workspacePath = project.path;
-    if (plugins.workspace) {
+    if (spawnConfig.workspacePath) {
+      // Reuse existing workspace (for workflow agents sharing same worktree)
+      workspacePath = spawnConfig.workspacePath;
+    } else if (plugins.workspace) {
       try {
         const wsInfo = await plugins.workspace.create({
           projectId: spawnConfig.projectId,

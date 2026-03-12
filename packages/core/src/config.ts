@@ -79,6 +79,29 @@ const NotifierConfigSchema = z
   })
   .passthrough();
 
+const WorkflowConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  prompts: z
+    .object({
+      architect: z.string().optional(),
+      builder: z.string().optional(),
+      reviewer: z.string().optional(),
+    })
+    .optional(),
+  builders: z
+    .object({
+      maxIterations: z.number().default(5),
+      tasksPerBuilder: z.number().default(3),
+    })
+    .optional(),
+  iterations: z
+    .object({
+      maxIterations: z.number().default(3),
+      autoMergeOnApproval: z.boolean().default(false),
+    })
+    .optional(),
+});
+
 const AgentPermissionSchema = z
   .enum(["permissionless", "default", "auto-edit", "suggest", "skip"])
   .default("permissionless")
@@ -133,6 +156,7 @@ const ProjectConfigSchema = z.object({
     .optional(),
   opencodeIssueSessionStrategy: z.enum(["reuse", "delete", "ignore"]).optional(),
   decomposer: DecomposerConfigSchema.optional(),
+  workflow: WorkflowConfigSchema.optional(),
 });
 
 const DefaultPluginsSchema = z.object({

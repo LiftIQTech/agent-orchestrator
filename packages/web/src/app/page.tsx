@@ -8,6 +8,7 @@ import {
   enrichSessionPR,
   enrichSessionsMetadata,
   computeStats,
+  collapseWorkflowSessions,
 } from "@/lib/serialize";
 import { prCache, prCacheKey } from "@/lib/cache";
 import { getProjectName } from "@/lib/project-name";
@@ -31,17 +32,18 @@ export default async function Home() {
     const { config, registry, sessionManager } = await getServices();
     projectIds = Object.keys(config.projects);
     const allSessions = await sessionManager.list();
-    globalPause = resolveGlobalPause(allSessions);
+    const collapsedSessions = collapseWorkflowSessions(allSessions);
+    globalPause = resolveGlobalPause(collapsedSessions);
 
     // Find the orchestrator session (any session ending with -orchestrator)
     // Only set orchestratorId if an actual session exists (no fallback)
-    const orchSession = allSessions.find((s) => s.id.endsWith("-orchestrator"));
+    const orchSession = collapsedSessions.find((s) => s.id.endsWith("-orchestrator"));
     if (orchSession) {
       orchestratorId = orchSession.id;
     }
 
     // Filter out orchestrator from worker sessions
-    const coreSessions = allSessions.filter((s) => !s.id.endsWith("-orchestrator"));
+    const coreSessions = collapsedSessions.filter((s) => !s.id.endsWith("-orchestrator"));
     sessions = coreSessions.map(sessionToDashboard);
 
     // Enrich metadata (issue labels, agent summaries, issue titles) — cap at 3s

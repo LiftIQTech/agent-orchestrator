@@ -21,6 +21,7 @@ import {
   enrichSessionIssueTitle,
   enrichSessionsMetadata,
   computeStats,
+  collapseWorkflowSessions,
 } from "../serialize";
 import { prCache, prCacheKey } from "../cache";
 import type { DashboardSession } from "../types";
@@ -1006,6 +1007,48 @@ describe("computeStats", () => {
     const stats = computeStats(sessions);
     expect(stats.totalSessions).toBe(5);
     expect(stats.workingSessions).toBe(3); // active + idle + ready
+  });
+});
+
+describe("collapseWorkflowSessions", () => {
+  it("collapses workflow stage sessions to one representative", () => {
+    const base = createCoreSession({
+      id: "li-1",
+      workspacePath: "/tmp/wt1",
+      metadata: {},
+    });
+    const architect = createCoreSession({
+      id: "li-2",
+      workspacePath: "/tmp/wt1",
+      createdAt: new Date("2025-01-01T01:00:00Z"),
+      metadata: { workflowId: "wf-1", workflowStage: "architect" },
+    });
+    const builder = createCoreSession({
+      id: "li-3",
+      workspacePath: "/tmp/wt1",
+      createdAt: new Date("2025-01-01T02:00:00Z"),
+      metadata: { workflowId: "wf-1", workflowStage: "builder" },
+    });
+    const reviewer = createCoreSession({
+      id: "li-4",
+      workspacePath: "/tmp/wt1",
+      createdAt: new Date("2025-01-01T03:00:00Z"),
+      metadata: { workflowId: "wf-1", workflowStage: "reviewer" },
+    });
+    const regular = createCoreSession({
+      id: "li-9",
+      workspacePath: "/tmp/wt9",
+      metadata: {},
+    });
+
+    const collapsed = collapseWorkflowSessions([base, architect, builder, reviewer, regular]);
+    const ids = collapsed.map((s) => s.id);
+
+    expect(ids).toContain("li-4");
+    expect(ids).toContain("li-9");
+    expect(ids).not.toContain("li-1");
+    expect(ids).not.toContain("li-2");
+    expect(ids).not.toContain("li-3");
   });
 });
 

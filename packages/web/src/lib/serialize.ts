@@ -21,6 +21,12 @@ import { TTLCache, prCache, prCacheKey, type PREnrichmentData } from "./cache";
 /** Cache for issue titles (5 min TTL — issue titles rarely change) */
 const issueTitleCache = new TTLCache<string>(300_000);
 
+const WORKFLOW_STAGE_RANK: Record<string, number> = {
+  reviewer: 3,
+  builder: 2,
+  architect: 1,
+};
+
 /** Resolve which project a session belongs to. */
 export function resolveProject(
   core: Session,
@@ -63,6 +69,51 @@ export function sessionToDashboard(session: Session): DashboardSession {
     pr: session.pr ? basicPRToDashboard(session.pr) : null,
     metadata: session.metadata,
   };
+}
+
+/**
+ * Collapse workflow stage sessions into a single representative session per workflow.
+ *
+ * - Keeps exactly one session for each workflowId (highest stage rank, then newest)
+ * - Hides non-workflow root/seed sessions that share the same workspace as a workflow stage
+ */
+export function collapseWorkflowSessions(sessions: Session[]): Session[] {
+  const byWorkflow = new Map<string, Session[]>();
+  const workflowWorkspacePaths = new Set<string>();
+
+  for (const session of sessions) {
+    const workflowId = session.metadata["workflowId"];
+    if (!workflowId) continue;
+    const list = byWorkflow.get(workflowId) ?? [];
+    list.push(session);
+    byWorkflow.set(workflowId, list);
+    if (session.workspacePath) {
+      workflowWorkspacePaths.add(session.workspacePath);
+    }
+  }
+
+  const representatives: Session[] = [];
+  for (const group of byWorkflow.values()) {
+    const sorted = [...group].sort((a, b) => {
+      const aRank = WORKFLOW_STAGE_RANK[a.metadata["workflowStage"] ?? ""] ?? 0;
+      const bRank = WORKFLOW_STAGE_RANK[b.metadata["workflowStage"] ?? ""] ?? 0;
+      if (aRank !== bRank) return bRank - aRank;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+    if (sorted[0]) {
+      representatives.push(sorted[0]);
+    }
+  }
+
+  const nonWorkflow = sessions.filter((session) => {
+    if (session.metadata["workflowId"]) return false;
+    if (session.workspacePath && workflowWorkspacePaths.has(session.workspacePath)) {
+      return false;
+    }
+    return true;
+  });
+
+  return [...nonWorkflow, ...representatives].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /**

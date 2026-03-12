@@ -188,6 +188,15 @@ export interface SessionSpawnConfig {
   siblings?: string[];
   /** Base branch to create feature branch from (default: project's defaultBranch) */
   baseBranch?: string;
+  
+  /** Workflow context */
+  workflowId?: string;
+  workflowStage?: WorkflowStage;
+  workflowIteration?: number;
+  builderIteration?: number;
+  
+  /** Reuse existing workspace path (for workflow agents sharing same worktree) */
+  workspacePath?: string;
 }
 
 /** Config for creating an orchestrator session */
@@ -945,6 +954,9 @@ export interface ProjectConfig {
     /** Require human approval before executing decomposed plans (default: true) */
     requireApproval: boolean;
   };
+
+  /** Workflow configuration for architect-delivery pattern */
+  workflow?: WorkflowConfig;
 }
 
 export interface TrackerConfig {
@@ -1077,6 +1089,12 @@ export interface SessionMetadata {
   terminalWsPort?: number;
   directTerminalWsPort?: number;
   opencodeSessionId?: string;
+  
+  /** Workflow fields */
+  workflowId?: string;
+  workflowStage?: string;
+  workflowIteration?: string;
+  builderIteration?: string;
 }
 
 // =============================================================================
@@ -1227,4 +1245,75 @@ export class SessionNotFoundError extends Error {
     super(`Session not found: ${sessionId}`);
     this.name = "SessionNotFoundError";
   }
+}
+
+// =============================================================================
+// WORKFLOW TYPES (Architect-Delivery Pattern)
+// =============================================================================
+
+export type WorkflowStage = "architect" | "builder" | "reviewer";
+
+export type WorkflowStatus = 
+  | "pending"
+  | "planning"    // Architect working
+  | "building"    // Builders working (sequential)
+  | "reviewing"   // Reviewer working
+  | "completed" 
+  | "failed";
+
+export type TaskStatus = "pending" | "completed";
+
+export interface WorkflowTask {
+  id: string;              // TASK-01, TASK-02
+  description: string;
+  status: TaskStatus;
+}
+
+export interface IterationState {
+  number: number;
+  status: "planning" | "building" | "reviewing" | "changes_requested" | "approved";
+  startedAt: string;
+  completedAt?: string;
+  planPath: string;
+  progressPath: string;
+  architectSession?: string;
+  builderSessions: string[];  // Sequential: [build-1, build-2, ...]
+  reviewerSession?: string;
+}
+
+export interface WorkflowState {
+  id: string;                    // wf-INT-123
+  issueId: string;               // INT-123
+  projectId: string;
+  status: WorkflowStatus;
+  currentIteration: number;
+  maxIterations: number;
+  currentBuilderIteration: number;  // 0, 1, 2, 3... within current iteration
+  maxBuilderIterations: number;     // e.g., 5
+  branch: string;
+  worktreePath: string;
+  createdAt: string;
+  updatedAt: string;
+  iterations: IterationState[];
+  artifacts: {
+    prs: string[];
+    mergedPRs: string[];
+  };
+}
+
+export interface WorkflowConfig {
+  enabled: boolean;
+  prompts?: {
+    architect?: string;
+    builder?: string;
+    reviewer?: string;
+  };
+  builders?: {
+    maxIterations: number;       // Default: 5
+    tasksPerBuilder: number;    // Default: 3
+  };
+  iterations?: {
+    maxIterations: number;       // Default: 3
+    autoMergeOnApproval: boolean;
+  };
 }

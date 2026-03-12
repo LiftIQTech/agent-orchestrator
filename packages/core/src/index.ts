@@ -156,3 +156,35 @@ export type {
   DetectedProjectInfo,
   GenerateConfigOptions,
 } from "./config-generator.js";
+
+// Workflow state — persistence for architect-delivery pattern
+export {
+  getWorkflowsDir,
+  getIterationsBaseDir,
+  getWorkflowStatePath,
+  getPlanPath,
+  getProgressPath,
+  generateWorkflowId,
+  createWorkflowState,
+  loadWorkflowState,
+  saveWorkflowState,
+  findWorkflowByIssue,
+  startNewIteration,
+} from "./workflow-state.js";
+
+// Task manager — PLAN.md parsing and task tracking
+export { createTaskManager } from "./task-manager.js";
+export type { TaskManagerDeps, TaskManager } from "./task-manager.js";
+
+// Prompt loader — workflow prompt loading and rendering
+export {
+  loadPromptFile,
+  buildPromptContext,
+  renderPrompt,
+  writeProgressEntry,
+} from "./prompt-loader.js";
+export type { PromptContext } from "./prompt-loader.js";
+
+// Workflow manager — orchestrates architect-delivery workflow
+export { createWorkflowManager } from "./workflow-manager.js";
+export type { WorkflowManagerDeps, WorkflowManager } from "./workflow-manager.js";

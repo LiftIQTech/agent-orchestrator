@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   SESSION_STATUS,
   PR_STATE,
@@ -695,11 +696,8 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     }
 
     // --- Automated (bot) review comments ---
-    if (automatedComments === null) {
-      console.debug(
-        `[ao lifecycle] Automated comments fetch failed for ${session.id}, preserving existing metadata`,
-      );
-    }
+    // Note: automatedComments === null is expected when API fetch fails (auth, rate limit, etc.)
+    // We preserve existing metadata in that case - no need to log
     if (automatedComments !== null) {
       const automatedFingerprint = makeFingerprint(automatedComments.map((comment) => comment.id));
       const lastAutomatedFingerprint = session.metadata["lastAutomatedReviewFingerprint"] ?? "";
@@ -838,6 +836,121 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     }
 
     await maybeDispatchReviewBacklog(session, oldStatus, newStatus, transitionReaction);
+
+    // Workflow advancement is handled centrally in advanceWorkflows() per poll cycle.
+  }
+
+  /** 
+   * Advance workflows that are ready for the next stage.
+   * Called on each poll cycle to check if architect/builder sessions are done.
+   */
+  async function advanceWorkflows(sessions: Session[]): Promise<void> {
+    // Check each project for workflows that need advancing
+    for (const [projectId, project] of Object.entries(config.projects)) {
+      const workflowEnabled = !!(project.workflow as Record<string, unknown> | undefined)?.enabled;
+      if (!workflowEnabled) continue;
+      
+      // Import workflow manager functions
+      const wm = await import("./workflow-manager.js").then(m => 
+        m.createWorkflowManager({ config, registry, sessionManager })
+      );
+      
+      const workflows = wm.listWorkflows(projectId);
+      
+      for (const workflow of workflows) {
+        // Skip completed/failed workflows
+        if (workflow.status === "completed" || workflow.status === "failed") continue;
+        
+        const iteration = workflow.iterations[workflow.currentIteration - 1];
+        if (!iteration) continue;
+        
+        // Check if architect is done and we're still in planning
+        if (workflow.status === "planning" && iteration.architectSession) {
+          const architectSession = sessions.find(s => s.id === iteration.architectSession);
+          
+          // Architect is done if: session is idle, exited, or in terminal state
+          // Also consider "ci_failed" as done since architect completed the plan
+          const isArchitectDone = !architectSession || 
+            architectSession.status === "done" ||
+            architectSession.status === "killed" ||
+            architectSession.status === "merged" ||
+            architectSession.status === "ci_failed" ||
+            (architectSession.lastActivityAt && 
+             Date.now() - new Date(architectSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
+          
+          if (isArchitectDone) {
+            try {
+              await wm.spawnNextBuilder(workflow.id);
+            } catch (err) {
+              console.error(`[ao lifecycle] Failed to advance workflow ${workflow.id}:`, err);
+            }
+          }
+        }
+        
+        // Check if builder is done and we're still in building
+        if (workflow.status === "building" && iteration.builderSessions.length > 0) {
+          const lastBuilderId = iteration.builderSessions[iteration.builderSessions.length - 1];
+          const builderSession = sessions.find(s => s.id === lastBuilderId);
+          
+          // Builder is done if: session is in terminal state or idle
+          const isBuilderDone = !builderSession ||
+            builderSession.status === "done" ||
+            builderSession.status === "killed" ||
+            builderSession.status === "merged" ||
+            builderSession.status === "ci_failed" ||
+            (builderSession.lastActivityAt &&
+             Date.now() - new Date(builderSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
+          
+          if (isBuilderDone) {
+            try {
+              await wm.spawnNextBuilder(workflow.id);
+            } catch (err) {
+              console.error(`[ao lifecycle] Failed to advance workflow ${workflow.id}:`, err);
+            }
+          }
+        }
+        
+        // Check if reviewer is done
+        if (workflow.status === "reviewing" && iteration.reviewerSession) {
+          const reviewerSession = sessions.find(s => s.id === iteration.reviewerSession);
+          
+          // Reviewer is done if: session is idle or in terminal state
+          const isReviewerDone = !reviewerSession ||
+            reviewerSession.status === "done" ||
+            reviewerSession.status === "killed" ||
+            reviewerSession.status === "merged" ||
+            reviewerSession.status === "ci_failed" ||
+            (reviewerSession.lastActivityAt &&
+             Date.now() - new Date(reviewerSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
+          
+          if (isReviewerDone) {
+            try {
+              // Check PROGRESS.md for verdict
+              const progressPath = iteration.progressPath;
+              if (progressPath) {
+                const progressContent = readFileSync(progressPath, "utf-8");
+                const isApproved = progressContent.includes("APPROVED") || 
+                                   progressContent.includes("VERDICT: APPROVED");
+                const isChangesRequested = progressContent.includes("CHANGES REQUESTED") ||
+                                           progressContent.includes("VERDICT: CHANGES REQUESTED");
+                
+                if (isApproved) {
+                  await wm.handleReviewComplete(workflow.id, true);
+                } else if (isChangesRequested) {
+                  const feedback = "Review requested changes. See PROGRESS.md for details.";
+                  await wm.handleReviewComplete(workflow.id, false, feedback);
+                } else {
+                  // Default to approved if we can't determine verdict
+                  await wm.handleReviewComplete(workflow.id, true);
+                }
+              }
+            } catch (err) {
+              console.error(`[ao lifecycle] Failed to handle review complete for ${workflow.id}:`, err);
+            }
+          }
+        }
+      }
+    }
   }
 
   /** Run one polling cycle across all sessions. */
@@ -893,6 +1006,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           reactionTrackers.delete(trackerKey);
         }
       }
+
+      // ==========================================================================
+      // WORKFLOW ADVANCEMENT
+      // Check for workflows that need advancing (architect done → builder, etc.)
+      // ==========================================================================
+      await advanceWorkflows(sessions);
 
       // Check if all sessions are complete (trigger reaction only once)
       const activeSessions = sessions.filter((s) => s.status !== "merged" && s.status !== "killed");

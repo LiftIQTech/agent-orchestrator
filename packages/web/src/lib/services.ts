@@ -15,6 +15,7 @@ import {
   createPluginRegistry,
   createSessionManager,
   createLifecycleManager,
+  createWorkflowManager,
   decompose,
   getLeaves,
   getSiblings,
@@ -209,6 +210,7 @@ async function relabelReopenedIssues(
 export async function pollBacklog(): Promise<void> {
   try {
     const { config, registry, sessionManager } = await getServices();
+    const workflowManager = createWorkflowManager({ config, registry, sessionManager });
 
     // Get all sessions
     const allSessions = await sessionManager.list();
@@ -253,6 +255,25 @@ export async function pollBacklog(): Promise<void> {
         if (activeIssueIds.has(issue.id.toLowerCase())) continue;
 
         try {
+          if (project.workflow?.enabled) {
+            await workflowManager.startWorkflow(projectId, issue.id);
+            availableSlots--;
+            activeIssueIds.add(issue.id.toLowerCase());
+
+            if (tracker.updateIssue) {
+              await tracker.updateIssue(
+                issue.id,
+                {
+                  labels: ["agent:in-progress"],
+                  removeLabels: ["agent:backlog"],
+                  comment: "Claimed by agent orchestrator — architect workflow started.",
+                },
+                project,
+              );
+            }
+            continue;
+          }
+
           const decompConfig = project.decomposer;
           const shouldDecompose = decompConfig?.enabled ?? false;
 

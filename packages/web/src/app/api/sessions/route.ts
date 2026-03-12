@@ -7,6 +7,7 @@ import {
   enrichSessionPR,
   enrichSessionsMetadata,
   computeStats,
+  collapseWorkflowSessions,
 } from "@/lib/serialize";
 import { resolveGlobalPause } from "@/lib/global-pause";
 
@@ -40,14 +41,15 @@ export async function GET(request: Request) {
 
     const { config, registry, sessionManager } = await getServices();
     const coreSessions = await sessionManager.list();
+    const collapsedSessions = collapseWorkflowSessions(coreSessions);
 
     // Find orchestrator session ID (if running) and expose to clients
-    const orchSession = coreSessions.find((s) => s.id.endsWith("-orchestrator"));
+    const orchSession = collapsedSessions.find((s) => s.id.endsWith("-orchestrator"));
     const orchestratorId = orchSession ? orchSession.id : null;
     const globalPause = resolveGlobalPause(coreSessions);
 
     // Filter out orchestrator sessions — they get their own button, not a card
-    let workerSessions = coreSessions.filter((s) => !s.id.endsWith("-orchestrator"));
+    let workerSessions = collapsedSessions.filter((s) => !s.id.endsWith("-orchestrator"));
 
     // Convert to dashboard format
     let dashboardSessions = workerSessions.map(sessionToDashboard);

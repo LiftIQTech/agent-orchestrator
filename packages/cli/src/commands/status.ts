@@ -11,6 +11,7 @@ import {
   type Tracker,
   type ProjectConfig,
   loadConfig,
+  isTerminalSession,
 } from "@composio/ao-core";
 import { git, getTmuxSessions, getTmuxActivity } from "../lib/shell.js";
 import {
@@ -24,6 +25,41 @@ import {
 } from "../lib/format.js";
 import { getAgentByName, getSCM } from "../lib/plugins.js";
 import { getSessionManager } from "../lib/create-session-manager.js";
+
+function collapseWorkflowStatusSessions(sessions: Session[]): Session[] {
+  const byWorkflow = new Map<string, Session[]>();
+  const workflowWorkspaces = new Set<string>();
+  const stageRank: Record<string, number> = { reviewer: 3, builder: 2, architect: 1 };
+
+  for (const session of sessions) {
+    const workflowId = session.metadata["workflowId"];
+    if (!workflowId) continue;
+    const list = byWorkflow.get(workflowId) ?? [];
+    list.push(session);
+    byWorkflow.set(workflowId, list);
+    if (session.workspacePath) workflowWorkspaces.add(session.workspacePath);
+  }
+
+  const chosen = new Set<string>();
+  for (const grouped of byWorkflow.values()) {
+    grouped.sort((a, b) => {
+      const aRank = stageRank[a.metadata["workflowStage"] ?? ""] ?? 0;
+      const bRank = stageRank[b.metadata["workflowStage"] ?? ""] ?? 0;
+      if (aRank !== bRank) return bRank - aRank;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+    if (grouped[0]) chosen.add(grouped[0].id);
+  }
+
+  return sessions.filter((session) => {
+    const workflowId = session.metadata["workflowId"];
+    if (workflowId) return chosen.has(session.id);
+    if (session.workspacePath && workflowWorkspaces.has(session.workspacePath)) {
+      return false;
+    }
+    return true;
+  });
+}
 
 interface SessionInfo {
   name: string;
@@ -212,7 +248,9 @@ export function registerStatus(program: Command): void {
 
       // Use session manager to list sessions (metadata-based, not tmux-based)
       const sm = await getSessionManager(config);
-      const sessions = await sm.list(opts.project);
+      const sessions = collapseWorkflowStatusSessions(await sm.list(opts.project)).filter(
+        (session) => !isTerminalSession(session),
+      );
 
       if (!opts.json) {
         console.log(banner("AGENT ORCHESTRATOR STATUS"));
