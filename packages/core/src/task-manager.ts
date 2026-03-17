@@ -69,8 +69,8 @@ export function createTaskManager(deps: TaskManagerDeps) {
    */
   function allTasksComplete(): boolean {
     const tasks = parseTasks();
-    // No tasks OR all completed
-    return tasks.length === 0 || tasks.every((t) => t.status === "completed");
+    // Require at least one task and all completed
+    return tasks.length > 0 && tasks.every((t) => t.status === "completed");
   }
 
   /**

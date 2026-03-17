@@ -131,6 +131,7 @@ function createOpenCodeAgent(): Agent {
   return {
     name: "opencode",
     processName: "opencode",
+    promptDelivery: "post-launch",
 
     getLaunchCommand(config: AgentLaunchConfig): string {
       const options: string[] = [];
@@ -150,15 +151,10 @@ function createOpenCodeAgent(): Agent {
       }
 
       let promptValue: string | undefined;
-      if (config.prompt) {
-        if (config.systemPromptFile) {
-          promptValue = `"$(cat ${shellEscape(config.systemPromptFile)}; printf '\\n\\n'; printf %s ${shellEscape(config.prompt)})"`;
-        } else if (config.systemPrompt) {
-          promptValue = shellEscape(`${config.systemPrompt}\n\n${config.prompt}`);
-        } else {
-          promptValue = shellEscape(config.prompt);
-        }
-      } else if (config.systemPromptFile) {
+      // OpenCode runs in interactive mode and receives the prompt post-launch
+      // via runtime.sendMessage. This avoids shell-escaping/length issues with
+      // large workflow prompts being inlined into the launch command.
+      if (config.systemPromptFile) {
         promptValue = `"$(cat ${shellEscape(config.systemPromptFile)})"`;
       } else if (config.systemPrompt) {
         promptValue = shellEscape(config.systemPrompt);

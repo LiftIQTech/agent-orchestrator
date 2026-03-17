@@ -127,6 +127,9 @@ function createDirectTransport(): GraphQLTransport {
 // ---------------------------------------------------------------------------
 
 type ComposioTools = Composio["tools"];
+const dynamicImport = new Function("specifier", "return import(specifier)") as (
+  specifier: string,
+) => Promise<unknown>;
 
 function createComposioTransport(apiKey: string, entityId: string): GraphQLTransport {
   // Lazy-load the Composio client — cached as a promise so the constructor
@@ -137,7 +140,8 @@ function createComposioTransport(apiKey: string, entityId: string): GraphQLTrans
     if (!clientPromise) {
       clientPromise = (async () => {
         try {
-          const { Composio } = await import("@composio/core");
+          const mod = (await dynamicImport("@composio/core")) as { Composio: new (cfg: { apiKey: string }) => Composio };
+          const { Composio } = mod;
           const client = new Composio({ apiKey });
           return client.tools;
         } catch (err: unknown) {

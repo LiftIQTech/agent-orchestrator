@@ -7,6 +7,7 @@ const {
   mockRegistry,
   tmuxPlugin,
   claudePlugin,
+  hostShellPlugin,
   opencodePlugin,
   worktreePlugin,
   scmPlugin,
@@ -33,6 +34,7 @@ const {
     mockRegistry,
     tmuxPlugin: { manifest: { name: "tmux" } },
     claudePlugin: { manifest: { name: "claude-code" } },
+    hostShellPlugin: { manifest: { name: "host-shell" } },
     opencodePlugin: { manifest: { name: "opencode" } },
     worktreePlugin: { manifest: { name: "worktree" } },
     scmPlugin: { manifest: { name: "github" } },
@@ -65,6 +67,7 @@ vi.mock("@composio/ao-core", () => ({
 
 vi.mock("@composio/ao-plugin-runtime-tmux", () => ({ default: tmuxPlugin }));
 vi.mock("@composio/ao-plugin-agent-claude-code", () => ({ default: claudePlugin }));
+vi.mock("@composio/ao-plugin-agent-host-shell", () => ({ default: hostShellPlugin }));
 vi.mock("@composio/ao-plugin-agent-opencode", () => ({ default: opencodePlugin }));
 vi.mock("@composio/ao-plugin-workspace-worktree", () => ({ default: worktreePlugin }));
 vi.mock("@composio/ao-plugin-scm-github", () => ({ default: scmPlugin }));
@@ -103,6 +106,14 @@ describe("services", () => {
     await getServices();
 
     expect(mockRegister).toHaveBeenCalledWith(opencodePlugin);
+  });
+
+  it("registers the host-shell agent plugin with web services", async () => {
+    const { getServices } = await import("../lib/services");
+
+    await getServices();
+
+    expect(mockRegister).toHaveBeenCalledWith(hostShellPlugin);
   });
 
   it("caches initialized services across repeated calls", async () => {
@@ -261,6 +272,61 @@ describe("pollBacklog", () => {
         comment: "Claimed by agent orchestrator — architect workflow started.",
       },
       expect.objectContaining({ tracker: { plugin: "github" } }),
+    );
+  });
+
+  it("removes agent:pending-merge when labeling merged issues for verification", async () => {
+    mockCreateSessionManager.mockReturnValue({
+      spawn: mockSpawn,
+      list: vi.fn().mockResolvedValue([
+        {
+          id: "test-1",
+          projectId: "test-project",
+          issueId: "645",
+          status: "merged",
+        },
+      ]),
+    });
+
+    mockLoadConfig.mockReturnValue({
+      configPath: "/tmp/agent-orchestrator.yaml",
+      port: 3000,
+      readyThresholdMs: 300_000,
+      defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
+      projects: {
+        "test-project": {
+          path: "/tmp/test-project",
+          tracker: { plugin: "github" },
+        },
+      },
+      notifiers: {},
+      notificationRouting: { urgent: [], action: [], warning: [], info: [] },
+      reactions: {},
+    });
+
+    mockListIssues.mockResolvedValue([]);
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { pollBacklog } = await import("../lib/services");
+    await pollBacklog();
+
+    expect(mockUpdateIssue).toHaveBeenCalledWith(
+      "645",
+      {
+        labels: ["merged-unverified"],
+        removeLabels: ["agent:backlog", "agent:in-progress", "agent:pending-merge"],
+        comment: "PR merged. Issue awaiting human verification on staging.",
+      },
+      expect.any(Object),
     );
   });
 });

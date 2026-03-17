@@ -1008,6 +1008,43 @@ describe("computeStats", () => {
     expect(stats.totalSessions).toBe(5);
     expect(stats.workingSessions).toBe(3); // active + idle + ready
   });
+
+  it("deduplicates open PR stats across multiple sessions sharing one PR", () => {
+    const sharedPr = {
+      number: 684,
+      url: "https://github.com/test/repo/pull/684",
+      title: "architect: issue 641 workflow branch",
+      owner: "test",
+      repo: "repo",
+      branch: "feat/641",
+      baseBranch: "main",
+      isDraft: true,
+      state: "open" as const,
+      additions: 100,
+      deletions: 20,
+      ciStatus: "failing" as const,
+      ciChecks: [],
+      reviewDecision: "none" as const,
+      mergeability: {
+        mergeable: false,
+        ciPassing: false,
+        approved: false,
+        noConflicts: true,
+        blockers: [],
+      },
+      unresolvedThreads: 0,
+      unresolvedComments: [],
+    };
+
+    const sessions = [
+      makeDashboard({ id: "s1", pr: sharedPr }),
+      makeDashboard({ id: "s2", pr: { ...sharedPr, additions: 120 } }),
+      makeDashboard({ id: "s3", pr: { ...sharedPr, unresolvedThreads: 2 } }),
+    ];
+
+    const stats = computeStats(sessions);
+    expect(stats.openPRs).toBe(1);
+  });
 });
 
 describe("collapseWorkflowSessions", () => {
@@ -1049,6 +1086,28 @@ describe("collapseWorkflowSessions", () => {
     expect(ids).not.toContain("li-1");
     expect(ids).not.toContain("li-2");
     expect(ids).not.toContain("li-3");
+  });
+
+  it("prefers active workflow stage over terminal higher-rank stage", () => {
+    const reviewerKilled = createCoreSession({
+      id: "li-20",
+      status: "killed",
+      activity: "exited",
+      workspacePath: "/tmp/wt2",
+      createdAt: new Date("2025-01-01T03:00:00Z"),
+      metadata: { workflowId: "wf-2", workflowStage: "reviewer" },
+    });
+    const builderWorking = createCoreSession({
+      id: "li-21",
+      status: "working",
+      activity: "active",
+      workspacePath: "/tmp/wt2",
+      createdAt: new Date("2025-01-01T02:00:00Z"),
+      metadata: { workflowId: "wf-2", workflowStage: "builder" },
+    });
+
+    const collapsed = collapseWorkflowSessions([reviewerKilled, builderWorking]);
+    expect(collapsed.map((s) => s.id)).toEqual(["li-21"]);
   });
 });
 

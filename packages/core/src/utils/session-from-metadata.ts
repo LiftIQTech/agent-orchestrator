@@ -32,8 +32,8 @@ export function sessionFromMetadata(
             title: "",
             owner: parsed?.owner ?? "",
             repo: parsed?.repo ?? "",
-            branch: meta["branch"] ?? "",
-            baseBranch: "",
+            branch: meta["prBranch"] ?? meta["branch"] ?? "",
+            baseBranch: meta["prBaseBranch"] ?? "",
             isDraft: false,
           };
         })()

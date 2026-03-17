@@ -4,12 +4,13 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { getProjectBaseDir, type OrchestratorConfig } from "@composio/ao-core";
+import { getProjectBaseDir, loadWorkflowState, createPluginRegistry, createSessionManager, createWorkflowManager, type OrchestratorConfig } from "@composio/ao-core";
 
 const LIFECYCLE_PID_FILE = "lifecycle-worker.pid";
 const LIFECYCLE_LOG_FILE = "lifecycle-worker.log";
@@ -165,12 +166,42 @@ async function waitForLifecycleWorker(
   return getLifecycleWorkerStatus(config, projectId);
 }
 
+async function resumeWorkflowsOnStartup(
+  config: OrchestratorConfig,
+  projectId: string,
+): Promise<void> {
+  const project = config.projects[projectId];
+  if (!project?.workflow?.enabled) return;
+
+  const workflowsDir = join(getProjectBase(config, projectId), "workflows");
+  if (!existsSync(workflowsDir)) return;
+
+  const registry = createPluginRegistry();
+  await registry.loadFromConfig(config, (pkg: string) => import(pkg));
+  const sessionManager = createSessionManager({ config, registry });
+  const workflowManager = createWorkflowManager({ config, registry, sessionManager });
+
+  for (const file of readdirSync(workflowsDir)) {
+    if (!file.endsWith(".json")) continue;
+    const workflowId = file.replace(/\.json$/, "");
+    const workflow = loadWorkflowState(config.configPath, project.path, workflowId);
+    if (!workflow) continue;
+    if (workflow.status === "completed" || workflow.status === "failed") continue;
+    try {
+      await workflowManager.resumeWorkflow(workflowId);
+    } catch {
+      // Best effort startup recovery only.
+    }
+  }
+}
+
 export async function ensureLifecycleWorker(
   config: OrchestratorConfig,
   projectId: string,
 ): Promise<LifecycleWorkerStatus & { started: boolean }> {
   const current = getLifecycleWorkerStatus(config, projectId);
   if (current.running) {
+    await resumeWorkflowsOnStartup(config, projectId);
     return { ...current, started: false };
   }
 
@@ -213,6 +244,8 @@ export async function ensureLifecycleWorker(
       `Lifecycle worker failed to start for project ${projectId}. See ${status.logFile}`,
     );
   }
+
+  await resumeWorkflowsOnStartup(config, projectId);
 
   return { ...status, started: true };
 }

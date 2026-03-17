@@ -46,6 +46,8 @@ describe("writeMetadata + readMetadata", () => {
       status: "pr_open",
       issue: "https://linear.app/team/issue/INT-100",
       pr: "https://github.com/org/repo/pull/42",
+      prBranch: "feat/test-branch",
+      prBaseBranch: "feature/base-branch",
       prAutoDetect: "off",
       summary: "Implementing feature X",
       project: "my-app",
@@ -57,6 +59,8 @@ describe("writeMetadata + readMetadata", () => {
     expect(meta).not.toBeNull();
     expect(meta!.issue).toBe("https://linear.app/team/issue/INT-100");
     expect(meta!.pr).toBe("https://github.com/org/repo/pull/42");
+    expect(meta!.prBranch).toBe("feat/test-branch");
+    expect(meta!.prBaseBranch).toBe("feature/base-branch");
     expect(meta!.prAutoDetect).toBe("off");
     expect(meta!.summary).toBe("Implementing feature X");
     expect(meta!.project).toBe("my-app");
@@ -150,11 +154,15 @@ describe("updateMetadata", () => {
     updateMetadata(dataDir, "upd-1", {
       status: "working",
       pr: "https://github.com/org/repo/pull/1",
+      prBranch: "feat/branch-1",
+      prBaseBranch: "main",
     });
 
     const meta = readMetadata(dataDir, "upd-1");
     expect(meta!.status).toBe("working");
     expect(meta!.pr).toBe("https://github.com/org/repo/pull/1");
+    expect(meta!.prBranch).toBe("feat/branch-1");
+    expect(meta!.prBaseBranch).toBe("main");
     expect(meta!.worktree).toBe("/tmp/w");
     expect(meta!.branch).toBe("main");
   });

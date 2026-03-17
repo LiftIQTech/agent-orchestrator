@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, lstatSync, symlinkSync, rmSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, symlinkSync, rmSync, mkdirSync, readdirSync, cpSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -27,6 +27,52 @@ export const manifest = {
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd });
   return stdout.trimEnd();
+}
+
+async function getExistingWorktreePath(repoPath: string, branch: string): Promise<string | null> {
+  try {
+    const output = await git(repoPath, "worktree", "list", "--porcelain");
+    const blocks = output.split("\n\n");
+    for (const block of blocks) {
+      const lines = block.trim().split("\n");
+      let worktreePath = "";
+      let worktreeBranch = "";
+
+      for (const line of lines) {
+        if (line.startsWith("worktree ")) {
+          worktreePath = line.slice("worktree ".length);
+        } else if (line.startsWith("branch ")) {
+          worktreeBranch = line.slice("branch ".length).replace("refs/heads/", "");
+        }
+      }
+
+      if (worktreePath && worktreeBranch === branch) {
+        return worktreePath;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function reuseExistingWorktree(
+  repoPath: string,
+  branch: string,
+  sessionId: string,
+  projectId: string,
+  message: string,
+): Promise<WorkspaceInfo | null> {
+  if (!message.includes("already used by worktree")) return null;
+  const existingPath = await getExistingWorktreePath(repoPath, branch);
+  if (!existingPath) return null;
+  return {
+    path: existingPath,
+    branch,
+    sessionId,
+    projectId,
+  };
 }
 
 /** Only allow safe characters in path segments to prevent directory traversal */
@@ -67,11 +113,22 @@ export function create(config?: Record<string, unknown>): Workspace {
       // Fetch latest from remote
       try {
         await git(repoPath, "fetch", "origin", "--quiet");
+        const desiredBase = cfg.baseBranch ?? cfg.project.defaultBranch;
+        if (desiredBase) {
+          await git(
+            repoPath,
+            "fetch",
+            "origin",
+            `+refs/heads/${desiredBase}:refs/remotes/origin/${desiredBase}`,
+            "--quiet",
+          );
+        }
       } catch {
         // Fetch may fail if offline — continue anyway
       }
 
-      const baseRef = `origin/${cfg.project.defaultBranch}`;
+      const chosenBaseBranch = cfg.baseBranch ?? cfg.project.defaultBranch;
+      const baseRef = `origin/${chosenBaseBranch}`;
 
       // Create worktree with a new branch
       try {
@@ -79,24 +136,47 @@ export function create(config?: Record<string, unknown>): Workspace {
       } catch (err: unknown) {
         // Only retry if the error is "branch already exists"
         const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("invalid reference") && chosenBaseBranch) {
+          await git(repoPath, "worktree", "add", "-b", cfg.branch, worktreePath, chosenBaseBranch);
+          return {
+            path: worktreePath,
+            branch: cfg.branch,
+            sessionId: cfg.sessionId,
+            projectId: cfg.projectId,
+          };
+        }
         if (!msg.includes("already exists")) {
           throw new Error(`Failed to create worktree for branch "${cfg.branch}": ${msg}`, {
             cause: err,
           });
         }
         // Branch already exists — create worktree and check it out
-        await git(repoPath, "worktree", "add", worktreePath, baseRef);
+        try {
+          await git(repoPath, "worktree", "add", worktreePath, baseRef);
+        } catch {
+          await git(repoPath, "worktree", "add", worktreePath, chosenBaseBranch);
+        }
         try {
           await git(worktreePath, "checkout", cfg.branch);
         } catch (checkoutErr: unknown) {
+          const checkoutMsg =
+            checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
+          const reused = await reuseExistingWorktree(
+            repoPath,
+            cfg.branch,
+            cfg.sessionId,
+            cfg.projectId,
+            checkoutMsg,
+          );
+          if (reused) {
+            return reused;
+          }
           // Checkout failed — remove the orphaned worktree before rethrowing
           try {
             await git(repoPath, "worktree", "remove", "--force", worktreePath);
           } catch {
             // Best-effort cleanup
           }
-          const checkoutMsg =
-            checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
           throw new Error(`Failed to checkout branch "${cfg.branch}" in worktree: ${checkoutMsg}`, {
             cause: checkoutErr,
           });
@@ -208,6 +288,7 @@ export function create(config?: Record<string, unknown>): Workspace {
 
     async restore(cfg: WorkspaceCreateConfig, workspacePath: string): Promise<WorkspaceInfo> {
       const repoPath = expandPath(cfg.project.path);
+      let architectDeliveryBackupPath: string | null = null;
 
       // Prune stale worktree entries
       try {
@@ -219,23 +300,84 @@ export function create(config?: Record<string, unknown>): Workspace {
       // Fetch latest
       try {
         await git(repoPath, "fetch", "origin", "--quiet");
+        const desiredBase = cfg.baseBranch ?? cfg.project.defaultBranch;
+        if (desiredBase) {
+          await git(
+            repoPath,
+            "fetch",
+            "origin",
+            `+refs/heads/${desiredBase}:refs/remotes/origin/${desiredBase}`,
+            "--quiet",
+          );
+        }
       } catch {
         // May fail if offline
       }
 
+      if (existsSync(workspacePath)) {
+        try {
+          await git(workspacePath, "rev-parse", "--is-inside-work-tree");
+        } catch {
+          const architectDeliveryPath = join(workspacePath, ".architect-delivery");
+          if (existsSync(architectDeliveryPath)) {
+            architectDeliveryBackupPath = `${workspacePath}.__ao_architect_delivery_backup`;
+            rmSync(architectDeliveryBackupPath, { recursive: true, force: true });
+            cpSync(architectDeliveryPath, architectDeliveryBackupPath, {
+              recursive: true,
+              force: true,
+            });
+          }
+          rmSync(workspacePath, { recursive: true, force: true });
+        }
+      }
+
       // Try to create worktree on the existing branch
+      const reuseRestoredWorktree = async (message: string): Promise<WorkspaceInfo | null> => {
+        const existing = await reuseExistingWorktree(
+          repoPath,
+          cfg.branch,
+          cfg.sessionId,
+          cfg.projectId,
+          message,
+        );
+        if (!existing) return null;
+        if (architectDeliveryBackupPath && existsSync(architectDeliveryBackupPath)) {
+          rmSync(architectDeliveryBackupPath, { recursive: true, force: true });
+          architectDeliveryBackupPath = null;
+        }
+        return existing;
+      };
+
       try {
         await git(repoPath, "worktree", "add", workspacePath, cfg.branch);
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const reused = await reuseRestoredWorktree(message);
+        if (reused) return reused;
         // Branch might not exist locally — try from origin
         const remoteBranch = `origin/${cfg.branch}`;
         try {
           await git(repoPath, "worktree", "add", "-b", cfg.branch, workspacePath, remoteBranch);
-        } catch {
+        } catch (remoteErr) {
+          const remoteMessage = remoteErr instanceof Error ? remoteErr.message : String(remoteErr);
+          const remoteReused = await reuseRestoredWorktree(remoteMessage);
+          if (remoteReused) return remoteReused;
           // Last resort: create from default branch
-      const baseRef = `origin/${cfg.baseBranch ?? cfg.project.defaultBranch}`;
+          const baseRef = `origin/${cfg.baseBranch ?? cfg.project.defaultBranch}`;
           await git(repoPath, "worktree", "add", "-b", cfg.branch, workspacePath, baseRef);
         }
+      }
+
+      if (architectDeliveryBackupPath && existsSync(architectDeliveryBackupPath)) {
+        const restoredArchitectDeliveryPath = join(workspacePath, ".architect-delivery");
+        if (!existsSync(restoredArchitectDeliveryPath)) {
+          cpSync(architectDeliveryBackupPath, restoredArchitectDeliveryPath, {
+            recursive: true,
+            force: true,
+          });
+        }
+        rmSync(architectDeliveryBackupPath, { recursive: true, force: true });
+        architectDeliveryBackupPath = null;
       }
 
       return {

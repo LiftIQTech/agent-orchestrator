@@ -39,6 +39,10 @@ export function SessionCard({ session, onSend, onKill, onMerge, onRestore }: Ses
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const level = getAttentionLevel(session);
   const pr = session.pr;
+  const workflowId = session.metadata["workflowId"];
+  const workflowStage = session.metadata["workflowStage"];
+  const workflowIteration = session.metadata["workflowIteration"];
+  const builderIteration = session.metadata["builderIteration"];
 
   useEffect(() => {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
@@ -134,6 +138,30 @@ export function SessionCard({ session, onSend, onKill, onMerge, onRestore }: Ses
         )}
         {pr && <PRStatus pr={pr} />}
       </div>
+
+      {/* Workflow stage/progress row */}
+      {workflowId && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2.5">
+          <span className="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-2 py-0.5 font-[var(--font-mono)] text-[10px] text-[var(--color-text-secondary)]">
+            {workflowId}
+          </span>
+          {workflowStage && (
+            <span className="rounded border border-[rgba(88,166,255,0.35)] bg-[rgba(88,166,255,0.08)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-accent)]">
+              stage: {workflowStage}
+            </span>
+          )}
+          {workflowIteration && (
+            <span className="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-[10px] text-[var(--color-text-tertiary)]">
+              iteration {workflowIteration}
+            </span>
+          )}
+          {builderIteration && (
+            <span className="rounded border border-[var(--color-border-default)] px-2 py-0.5 text-[10px] text-[var(--color-text-tertiary)]">
+              builder {builderIteration}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Rate limited indicator */}
       {rateLimited && pr?.state === "open" && (

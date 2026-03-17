@@ -37,6 +37,7 @@ export interface PromptContext {
     name: string;
     repo: string;
     defaultBranch: string;
+    baseBranch: string;
   };
   workflow: {
     id: string;
@@ -46,6 +47,12 @@ export interface PromptContext {
     maxBuilderIterations: number;
   };
   iteration: number;
+  requirementsPath: string;
+  iterationDir: string;
+  planPath: string;
+  progressPath: string;
+  orchestratorAnalysisPath: string;
+  reviewFindingsPath: string;
   builderNum?: number;
   previousFeedback?: string;
 }
@@ -93,101 +100,61 @@ function getBuiltInPrompt(stage: "architect" | "builder" | "reviewer"): string {
   const prompts: Record<string, string> = {
     architect: `# Architect Agent
 
-You are the **Architect** for issue \`{{issue.identifier}}\`.
+You are the strategic planner for issue \`{{issue.identifier}}\`.
 
-## Context
-- Issue: {{issue.identifier}} - {{issue.title}}
-- Iteration: {{iteration}} of {{workflow.maxIterations}}
-{{#if (eq iteration 1)}}
-## Requirements
-Read the issue description and create a detailed implementation plan.
+Read \`{{requirementsPath}}\`, assess the current state, then write:
+- \`{{planPath}}\`
+- \`{{orchestratorAnalysisPath}}\`
 
-{{else}}
-## Previous Feedback
-Address the following from the review:
-{{previousFeedback}}
+PLAN.md MUST contain 3-7 tasks using exact checkbox syntax:
 
-{{/if}}
+\`\`\`markdown
+# PLAN
 
-## Your Task
-1. Analyze what's been done vs what remains
-2. Create PLAN.md with tasks:
-   \`\`\`markdown
-   # PLAN
-   
-   - [ ] TASK-01: First task description
-   - [ ] TASK-02: Second task description
-   - [ ] TASK-03: Third task description
-   \`\`\`
+- [ ] TASK-01: Clear actionable task
+- [ ] TASK-02: Clear actionable task
+- [ ] TASK-03: Clear actionable task
+\`\`\`
 
-3. Document your analysis in orchestrator-analysis.md
-
-## Important
-- Write PLAN.md to: {{planPath}}
-- Use checkbox format: \`- [ ] TASK-XX:\` for tasks
-- If goal achieved, write \`# GOAL ACHIEVED\` at top of PLAN.md
+Rules:
+- do not leave placeholder text
+- do not modify requirements.md
+- do not create/switch branches
+- commit planning artifacts with message starting \`architect(i{{iteration}}):\`
 `,
     builder: `# Builder Agent
 
-You are **Builder {{builderNum}}** for issue \`{{issue.identifier}}\`.
+You are Builder {{builderNum}} for issue \`{{issue.identifier}}\`.
 
-## Context
-- Issue: {{issue.identifier}} - {{issue.title}}
-- Iteration: {{iteration}} of {{workflow.maxIterations}}
-- Builder: {{builderNum}} of {{workflow.maxBuilderIterations}}
+Read \`{{planPath}}\` and complete the next unchecked task(s).
 
-## Your Task
-1. Read PLAN.md at: {{planPath}}
-2. Pick 1-3 uncompleted tasks (marked with \`- [ ]\`)
-3. Implement the tasks
-4. Mark them complete: change \`- [ ]\` to \`- [x]\`
-5. Update PROGRESS.md at: {{progressPath}}
-6. Commit with message: \`architect(i{{iteration}}-b{{builderNum}}): <task summary>\`
+Before finishing you MUST:
+- update PLAN.md checkboxes to \`- [x]\`
+- append to \`{{progressPath}}\`
+- run relevant tests
+- commit your work with message starting \`architect(i{{iteration}}-b{{builderNum}}):\`
 
-## Important
-- Work in the existing workspace - do NOT create new branches
-- Commit after EACH task is complete
-- Update PLAN.md checkboxes as you complete tasks
-- If all tasks done early, you can stop
-
-## PROGRESS.md Format
-Append your work:
-\`\`\`markdown
-## Builder {{builderNum}} ({{timestamp}})
-
-### Tasks Completed
-- [x] TASK-XX: Description
-
-### Summary
-Brief description of what was done.
-
-**Commit:** \`abc123\`
-\`\`\`
+Rules:
+- stay on the current workflow branch
+- do not create or update PRs
+- do not create/switch branches
+- only change files relevant to the planned tasks
+- if a command or validation is long-running, split the work into smaller verifiable chunks and keep making progress
+- if local daemon-managed services need a restart to proceed, restart them yourself and document it in progress output instead of asking
 `,
     reviewer: `# Reviewer Agent
 
-You are the **Reviewer** for issue \`{{issue.identifier}}\`.
+You are the reviewer for issue \`{{issue.identifier}}\`.
 
-## Context
-- Issue: {{issue.identifier}} - {{issue.title}}
-- Iteration: {{iteration}} of {{workflow.maxIterations}}
+Review the iteration work against \`{{planPath}}\`, \`{{progressPath}}\`, and the changed code.
 
-## Your Task
-1. Review the implementation in the current branch
-2. Check against PLAN.md
-3. Verify:
-   - All tasks are implemented
-   - Tests pass
-   - Code quality is acceptable
+You MUST write \`{{reviewFindingsPath}}\` with one explicit verdict:
+- \`## VERDICT: APPROVED\`
+- \`## VERDICT: CHANGES REQUESTED\`
 
-4. Decision:
-   - If APPROVED: Comment "APPROVED - Ready to merge"
-   - If CHANGES REQUESTED: List specific issues that need addressing
-
-## Important
-- Be thorough but fair
-- Focus on correctness and completeness
-- Consider edge cases and error handling
+If changes are requested, include specific issues, files, and fixes.
+Do not leave placeholder text in the findings file.
+Do not modify product code.
 `,
   };
   return prompts[stage] ?? "";
@@ -230,6 +197,7 @@ export function buildPromptContext(
       name: project.name,
       repo: project.repo,
       defaultBranch: project.defaultBranch,
+      baseBranch: workflow.baseBranch,
     },
     workflow: {
       id: workflow.id,
@@ -239,6 +207,12 @@ export function buildPromptContext(
       maxBuilderIterations: workflow.maxBuilderIterations,
     },
     iteration: iteration.number,
+    requirementsPath: join(dirname(dirname(iteration.iterationDir)), "requirements.md"),
+    iterationDir: iteration.iterationDir,
+    planPath: iteration.planPath,
+    progressPath: iteration.progressPath,
+    orchestratorAnalysisPath: iteration.orchestratorAnalysisPath,
+    reviewFindingsPath: iteration.reviewFindingsPath,
     previousFeedback,
     ...extras,
   };

@@ -100,6 +100,37 @@ async function ghIssueListJson(args: string[]): Promise<string> {
   }
 }
 
+async function ghIssueComments(
+  identifier: string,
+  project: ProjectConfig,
+): Promise<Array<{ user?: { login?: string }; body?: string; created_at?: string }>> {
+  const issueNum = identifier.replace(/^#/, "");
+  const raw = await gh([
+    "api",
+    `repos/${project.repo}/issues/${issueNum}/comments?per_page=30`,
+  ]);
+  return JSON.parse(raw);
+}
+
+function appendLatestCommentsToDescription(
+  description: string,
+  comments: Array<{ user?: { login?: string }; body?: string; created_at?: string }>,
+): string {
+  if (!Array.isArray(comments) || comments.length === 0) return description;
+
+  const latest = comments.slice(-5);
+  const rendered = latest
+    .map((c) => {
+      const author = c.user?.login ?? "unknown";
+      const createdAt = c.created_at ?? "";
+      const body = (c.body ?? "").trim();
+      return `### ${author} (${createdAt})\n${body}`;
+    })
+    .join("\n\n");
+
+  return `${description ?? ""}\n\n## Latest Issue Comments\n\n${rendered}`.trim();
+}
+
 function mapState(ghState: string, stateReason?: string | null): Issue["state"] {
   const s = ghState.toUpperCase();
   if (s === "CLOSED") {
@@ -131,10 +162,18 @@ function createGitHubTracker(): Tracker {
         assignees: Array<{ login: string }>;
       } = JSON.parse(raw);
 
+      let description = data.body ?? "";
+      try {
+        const comments = await ghIssueComments(identifier, project);
+        description = appendLatestCommentsToDescription(description, comments);
+      } catch {
+        // Non-fatal: if comments fetch fails, continue with issue body only.
+      }
+
       return {
         id: String(data.number),
         title: data.title,
-        description: data.body ?? "",
+        description,
         url: data.url,
         state: mapState(data.state, data.stateReason),
         labels: data.labels.map((l) => l.name),

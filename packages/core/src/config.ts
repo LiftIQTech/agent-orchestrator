@@ -96,7 +96,7 @@ const WorkflowConfigSchema = z.object({
     .optional(),
   iterations: z
     .object({
-      maxIterations: z.number().default(3),
+      maxIterations: z.number().default(30),
       autoMergeOnApproval: z.boolean().default(false),
     })
     .optional(),

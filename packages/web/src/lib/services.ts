@@ -37,6 +37,7 @@ import {
 // Static plugin imports — webpack needs these to be string literals
 import pluginRuntimeTmux from "@composio/ao-plugin-runtime-tmux";
 import pluginAgentClaudeCode from "@composio/ao-plugin-agent-claude-code";
+import pluginAgentHostShell from "@composio/ao-plugin-agent-host-shell";
 import pluginAgentOpencode from "@composio/ao-plugin-agent-opencode";
 import pluginWorkspaceWorktree from "@composio/ao-plugin-workspace-worktree";
 import pluginScmGithub from "@composio/ao-plugin-scm-github";
@@ -79,6 +80,7 @@ async function initServices(): Promise<Services> {
   // Register plugins explicitly (webpack can't handle dynamic import() in core)
   registry.register(pluginRuntimeTmux);
   registry.register(pluginAgentClaudeCode);
+  registry.register(pluginAgentHostShell);
   registry.register(pluginAgentOpencode);
   registry.register(pluginWorkspaceWorktree);
   registry.register(pluginScmGithub);
@@ -135,6 +137,9 @@ async function labelIssuesForVerification(
   );
 
   for (const session of mergedSessions) {
+    if (!session.issueId) {
+      continue;
+    }
     const key = `${session.projectId}:${session.issueId}`;
     const project = config.projects[session.projectId];
     if (!project?.tracker) {
@@ -150,10 +155,10 @@ async function labelIssuesForVerification(
 
     try {
       await tracker.updateIssue(
-        session.issueId!,
+        session.issueId,
         {
           labels: ["merged-unverified"],
-          removeLabels: ["agent:backlog", "agent:in-progress"],
+          removeLabels: ["agent:backlog", "agent:in-progress", "agent:pending-merge"],
           comment: `PR merged. Issue awaiting human verification on staging.`,
         },
         project,
@@ -224,7 +229,9 @@ export async function pollBacklog(): Promise<void> {
       (s) => !s.id.endsWith("-orchestrator") && !TERMINAL_STATUSES.has(s.status),
     );
     const activeIssueIds = new Set(
-      workerSessions.filter((s) => s.issueId).map((s) => s.issueId!.toLowerCase()),
+      workerSessions
+        .filter((s): s is Session & { issueId: string } => typeof s.issueId === "string")
+        .map((s) => s.issueId.toLowerCase()),
     );
 
     // Auto-scaling: respect max concurrent agents

@@ -3340,6 +3340,46 @@ describe("restore", () => {
     expect(mockRuntime.create).toHaveBeenCalled();
   });
 
+  it("persists the restored workspace path when restore reattaches to a different worktree", async () => {
+    const originalPath = join(tmpDir, "ws-missing-app-1");
+    const reattachedPath = join(tmpDir, "ws-existing-app-9");
+
+    const mockWorkspaceWithRestore: Workspace = {
+      ...mockWorkspace,
+      exists: vi.fn().mockResolvedValue(false),
+      restore: vi.fn().mockResolvedValue({
+        path: reattachedPath,
+        branch: "feat/TEST-1",
+        sessionId: "app-1",
+        projectId: "my-app",
+      }),
+    };
+
+    const registryWithRestore: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "workspace") return mockWorkspaceWithRestore;
+        return null;
+      }),
+    };
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: originalPath,
+      branch: "feat/TEST-1",
+      status: "terminated",
+      project: "my-app",
+      runtimeHandle: JSON.stringify(makeHandle("rt-old")),
+    });
+
+    const sm = createSessionManager({ config, registry: registryWithRestore });
+    const restored = await sm.restore("app-1");
+
+    expect(restored.workspacePath).toBe(reattachedPath);
+    expect(readMetadataRaw(sessionsDir, "app-1")?.["worktree"]).toBe(reattachedPath);
+  });
+
   it("throws SessionNotRestorableError for merged sessions", async () => {
     writeMetadata(sessionsDir, "app-1", {
       worktree: "/tmp",

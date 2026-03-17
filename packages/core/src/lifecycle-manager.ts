@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   SESSION_STATUS,
   PR_STATE,
@@ -36,12 +36,28 @@ import {
 } from "./types.js";
 import { updateMetadata } from "./metadata.js";
 import { getSessionsDir } from "./paths.js";
+import { saveWorkflowState } from "./workflow-state.js";
 import {
   GLOBAL_PAUSE_UNTIL_KEY,
   GLOBAL_PAUSE_REASON_KEY,
   GLOBAL_PAUSE_SOURCE_KEY,
   parsePauseUntil,
 } from "./global-pause.js";
+
+const WORKFLOW_SENTINEL_PREFIX = "__AO_STAGE_DONE__";
+const WORKFLOW_STAGE_IDLE_TIMEOUT_MS = 10 * 60_000;
+const WORKFLOW_STAGE_TIMEOUT_MS = 60 * 60_000;
+
+function parseWorkflowStageExitCode(output: string): number | null {
+  const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.startsWith(`${WORKFLOW_SENTINEL_PREFIX}:`)) continue;
+    const code = Number.parseInt(line.slice(`${WORKFLOW_SENTINEL_PREFIX}:`.length), 10);
+    return Number.isFinite(code) ? code : null;
+  }
+  return null;
+}
 
 /** Parse a duration string like "10m", "30s", "1h" to milliseconds. */
 function parseDuration(str: string): number {
@@ -93,6 +109,25 @@ function parseRateLimitReset(output: string): Date | null {
   const unit = durationMatch[2].toLowerCase();
   const millis = unit.startsWith("h") ? value * 3_600_000 : value * 60_000;
   return new Date(Date.now() + millis);
+}
+
+function hasWorkflowStageTimedOut(startedAt?: string): boolean {
+  if (!startedAt) return false;
+  const started = Date.parse(startedAt);
+  if (Number.isNaN(started)) return false;
+  return Date.now() - started >= WORKFLOW_STAGE_TIMEOUT_MS;
+}
+
+function hasWorkflowStageGoneIdle(lastActivityAt?: string): boolean {
+  if (!lastActivityAt) return false;
+  const last = Date.parse(lastActivityAt);
+  if (Number.isNaN(last)) return false;
+  return Date.now() - last >= WORKFLOW_STAGE_IDLE_TIMEOUT_MS;
+}
+
+function isWorkflowStageReadyForAdvance(session?: Session): boolean {
+  if (!session) return false;
+  return session.activity === "ready";
 }
 
 /** Infer a reasonable priority from event type. */
@@ -368,7 +403,11 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           // Don't write status here — step 4 below will determine the
           // correct status (merged, ci_failed, etc.) on this same cycle.
           const sessionsDir = getSessionsDir(config.configPath, project.path);
-          updateMetadata(sessionsDir, session.id, { pr: detectedPR.url });
+          updateMetadata(sessionsDir, session.id, {
+            pr: detectedPR.url,
+            prBranch: detectedPR.branch,
+            prBaseBranch: detectedPR.baseBranch,
+          });
         }
       } catch {
         // SCM detection failed — will retry next poll
@@ -376,7 +415,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     }
 
     // 4. Check PR state if PR exists
-    if (session.pr && scm) {
+    const isWorkflowHostShell =
+      session.metadata["agent"] === "host-shell" &&
+      typeof session.metadata["workflowId"] === "string" &&
+      session.metadata["workflowId"].length > 0;
+
+    if (session.pr && scm && !isWorkflowHostShell) {
       try {
         const prState = await scm.getPRState(session.pr);
         if (prState === PR_STATE.MERGED) return "merged";
@@ -401,6 +445,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       } catch {
         // SCM check failed — keep current status
       }
+    }
+
+    if (isWorkflowHostShell) {
+      return session.status === "spawning" ? "spawning" : "working";
     }
 
     // 5. Default: if agent is active, it's working
@@ -589,6 +637,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     newStatus: SessionStatus,
     transitionReaction?: { key: string; result: ReactionResult | null },
   ): Promise<void> {
+    // Workflow-managed sessions have their own architect/builder/reviewer loop and
+    // should not receive generic review-backlog reaction injections.
+    if (session.metadata["workflowId"]) return;
+
     const project = config.projects[session.projectId];
     if (!project || !session.pr) return;
 
@@ -857,30 +909,110 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       
       const workflows = wm.listWorkflows(projectId);
       
-      for (const workflow of workflows) {
+      for (const listedWorkflow of workflows) {
+        let workflow = listedWorkflow;
         // Skip completed/failed workflows
         if (workflow.status === "completed" || workflow.status === "failed") continue;
+
+        // Deterministic guard: workflow sessions must stay on workflow.branch
+        const workflowSessions = sessions.filter((s) => s.metadata["workflowId"] === workflow.id);
+        const branchMismatch = workflowSessions.find(
+          (s) => !!s.branch && s.branch !== workflow.branch,
+        );
+        if (branchMismatch) {
+          await wm.killWorkflow(workflow.id);
+          continue;
+        }
+        const prMismatch = workflowSessions.find(
+          (s) =>
+            !!s.pr &&
+            (s.pr.branch !== workflow.branch || s.pr.baseBranch !== workflow.baseBranch),
+        );
+        if (prMismatch) {
+          await wm.killWorkflow(workflow.id);
+          continue;
+        }
         
-        const iteration = workflow.iterations[workflow.currentIteration - 1];
+        let iteration = workflow.iterations[workflow.currentIteration - 1];
         if (!iteration) continue;
-        
+
+        const ownerSession = workflow.ownerSessionId
+          ? sessions.find((s) => s.id === workflow.ownerSessionId)
+          : undefined;
+
+        const desiredStage = workflow.desiredStage ?? "architect";
+        const desiredIteration = workflow.desiredIteration ?? workflow.currentIteration;
+        const desiredBuilderIteration = workflow.desiredBuilderIteration ?? workflow.currentBuilderIteration;
+
+        const stageSessionId =
+          desiredStage === "reviewer"
+            ? iteration.reviewerSession
+            : desiredStage === "builder"
+            ? iteration.builderSessions[Math.max(desiredBuilderIteration - 1, 0)] ?? iteration.builderSessions[iteration.builderSessions.length - 1]
+            : iteration.architectSession;
+        const stageSession = stageSessionId ? sessions.find((s) => s.id === stageSessionId) : ownerSession;
+
+        const staleStageMetadata =
+          ownerSession &&
+          (ownerSession.metadata["workflowStage"] !== desiredStage ||
+            ownerSession.metadata["workflowIteration"] !== String(desiredIteration) ||
+            (desiredStage === "builder" &&
+              ownerSession.metadata["builderIteration"] !== String(desiredBuilderIteration)));
+
+        if (stageSession?.lastActivityAt) {
+          const activityAt = stageSession.lastActivityAt.toISOString();
+          if (!workflow.lastStageActivityAt || Date.parse(activityAt) > Date.parse(workflow.lastStageActivityAt)) {
+            workflow.lastStageActivityAt = activityAt;
+            saveWorkflowState(config.configPath, project.path, workflow);
+          }
+        }
+
+        const stageTimedOut = hasWorkflowStageTimedOut(workflow.dispatchStartedAt);
+        const stageGoneIdle = hasWorkflowStageGoneIdle(workflow.lastStageActivityAt);
+
+        const stagePending = workflow.dispatchStatus === "pending";
+        const shouldResumePendingStage =
+          stagePending && (!ownerSession || ownerSession.activity === "ready" || staleStageMetadata);
+
+        if ((stageTimedOut || stageGoneIdle) && ownerSession) {
+          try {
+            await sessionManager.kill(ownerSession.id, { purgeOpenCode: false });
+          } catch {
+            // Best effort kill before resume.
+          }
+          workflow.ownerSessionId = "";
+          workflow.dispatchStatus = "pending";
+          saveWorkflowState(config.configPath, project.path, workflow);
+        }
+
+        if (!ownerSession || ownerSession.activity === "ready" || staleStageMetadata || stageTimedOut || stageGoneIdle || shouldResumePendingStage) {
+          try {
+            workflow = await wm.resumeWorkflow(workflow.id);
+            iteration = workflow.iterations[workflow.currentIteration - 1];
+            if (!iteration) continue;
+          } catch (err) {
+            console.error(`[ao lifecycle] Failed to resume workflow ${workflow.id}:`, err);
+          }
+        }
+         
         // Check if architect is done and we're still in planning
         if (workflow.status === "planning" && iteration.architectSession) {
           const architectSession = sessions.find(s => s.id === iteration.architectSession);
-          
-          // Architect is done if: session is idle, exited, or in terminal state
-          // Also consider "ci_failed" as done since architect completed the plan
-          const isArchitectDone = !architectSession || 
-            architectSession.status === "done" ||
-            architectSession.status === "killed" ||
-            architectSession.status === "merged" ||
-            architectSession.status === "ci_failed" ||
-            (architectSession.lastActivityAt && 
-             Date.now() - new Date(architectSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
-          
-          if (isArchitectDone) {
+          if (architectSession?.runtimeHandle && isWorkflowStageReadyForAdvance(architectSession)) {
             try {
-              await wm.spawnNextBuilder(workflow.id);
+              const runtime = registry.get<Runtime>(
+                "runtime",
+                architectSession.runtimeHandle.runtimeName ??
+                  config.projects[architectSession.projectId]?.runtime ??
+                  config.defaults.runtime,
+              );
+              const output = runtime
+                ? await runtime.getOutput(architectSession.runtimeHandle, 120)
+                : "";
+              const exitCode = parseWorkflowStageExitCode(output);
+              if (exitCode === 0) {
+                await wm.spawnNextBuilder(workflow.id);
+              }
             } catch (err) {
               console.error(`[ao lifecycle] Failed to advance workflow ${workflow.id}:`, err);
             }
@@ -891,19 +1023,21 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         if (workflow.status === "building" && iteration.builderSessions.length > 0) {
           const lastBuilderId = iteration.builderSessions[iteration.builderSessions.length - 1];
           const builderSession = sessions.find(s => s.id === lastBuilderId);
-          
-          // Builder is done if: session is in terminal state or idle
-          const isBuilderDone = !builderSession ||
-            builderSession.status === "done" ||
-            builderSession.status === "killed" ||
-            builderSession.status === "merged" ||
-            builderSession.status === "ci_failed" ||
-            (builderSession.lastActivityAt &&
-             Date.now() - new Date(builderSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
-          
-          if (isBuilderDone) {
+          if (builderSession?.runtimeHandle && isWorkflowStageReadyForAdvance(builderSession)) {
             try {
-              await wm.spawnNextBuilder(workflow.id);
+              const runtime = registry.get<Runtime>(
+                "runtime",
+                builderSession.runtimeHandle.runtimeName ??
+                  config.projects[builderSession.projectId]?.runtime ??
+                  config.defaults.runtime,
+              );
+              const output = runtime
+                ? await runtime.getOutput(builderSession.runtimeHandle, 120)
+                : "";
+              const exitCode = parseWorkflowStageExitCode(output);
+              if (exitCode === 0) {
+                await wm.spawnNextBuilder(workflow.id);
+              }
             } catch (err) {
               console.error(`[ao lifecycle] Failed to advance workflow ${workflow.id}:`, err);
             }
@@ -913,35 +1047,44 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         // Check if reviewer is done
         if (workflow.status === "reviewing" && iteration.reviewerSession) {
           const reviewerSession = sessions.find(s => s.id === iteration.reviewerSession);
-          
-          // Reviewer is done if: session is idle or in terminal state
-          const isReviewerDone = !reviewerSession ||
-            reviewerSession.status === "done" ||
-            reviewerSession.status === "killed" ||
-            reviewerSession.status === "merged" ||
-            reviewerSession.status === "ci_failed" ||
-            (reviewerSession.lastActivityAt &&
-             Date.now() - new Date(reviewerSession.lastActivityAt).getTime() > 60_000); // idle for 1 min
-          
-          if (isReviewerDone) {
+          if (reviewerSession?.runtimeHandle && isWorkflowStageReadyForAdvance(reviewerSession)) {
             try {
-              // Check PROGRESS.md for verdict
-              const progressPath = iteration.progressPath;
-              if (progressPath) {
-                const progressContent = readFileSync(progressPath, "utf-8");
-                const isApproved = progressContent.includes("APPROVED") || 
-                                   progressContent.includes("VERDICT: APPROVED");
-                const isChangesRequested = progressContent.includes("CHANGES REQUESTED") ||
-                                           progressContent.includes("VERDICT: CHANGES REQUESTED");
+              const runtime = registry.get<Runtime>(
+                "runtime",
+                reviewerSession.runtimeHandle.runtimeName ??
+                  config.projects[reviewerSession.projectId]?.runtime ??
+                  config.defaults.runtime,
+              );
+              const output = runtime
+                ? await runtime.getOutput(reviewerSession.runtimeHandle, 120)
+                : "";
+              const exitCode = parseWorkflowStageExitCode(output);
+              if (exitCode !== 0) {
+                continue;
+              }
+
+              // Check CODE_REVIEW_FINDINGS.md for verdict
+              const reviewPath = iteration.reviewFindingsPath;
+              if (reviewPath) {
+                if (!existsSync(reviewPath)) {
+                  continue;
+                }
+
+                const reviewContent = readFileSync(reviewPath, "utf-8");
+                const hasPlaceholder = reviewContent.includes("(Pending reviewer output)");
+                const isApproved = reviewContent.includes("APPROVED") || 
+                                   reviewContent.includes("VERDICT: APPROVED");
+                const isChangesRequested = reviewContent.includes("CHANGES REQUESTED") ||
+                                           reviewContent.includes("VERDICT: CHANGES REQUESTED");
                 
-                if (isApproved) {
+                if (hasPlaceholder) {
+                  continue;
+                } else if (isApproved) {
                   await wm.handleReviewComplete(workflow.id, true);
                 } else if (isChangesRequested) {
-                  const feedback = "Review requested changes. See PROGRESS.md for details.";
-                  await wm.handleReviewComplete(workflow.id, false, feedback);
+                  await wm.handleReviewComplete(workflow.id, false, reviewContent);
                 } else {
-                  // Default to approved if we can't determine verdict
-                  await wm.handleReviewComplete(workflow.id, true);
+                  continue;
                 }
               }
             } catch (err) {

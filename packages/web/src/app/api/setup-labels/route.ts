@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const LABELS = [
   { name: "agent:backlog", color: "6B7280", description: "Available for agent to claim" },
   { name: "agent:in-progress", color: "7C3AED", description: "Agent is working on this" },
+  { name: "agent:pending-merge", color: "2563EB", description: "Agent completed work; awaiting PR review/merge" },
   { name: "agent:blocked", color: "DC2626", description: "Agent is blocked" },
   { name: "agent:done", color: "16A34A", description: "Agent completed this" },
 ];

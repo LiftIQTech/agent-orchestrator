@@ -176,6 +176,8 @@ export interface Session {
 export interface SessionSpawnConfig {
   projectId: string;
   issueId?: string;
+  /** Skip tracker issue fetch validation (useful during tracker outages) */
+  skipIssueValidation?: boolean;
   branch?: string;
   prompt?: string;
   /** Override the agent plugin for this session (e.g. "codex", "claude-code") */
@@ -530,6 +532,18 @@ export interface CreateIssueInput {
  */
 export interface SCM {
   readonly name: string;
+
+  /** Create a PR deterministically for a branch/base pair. */
+  createPR?(
+    project: ProjectConfig,
+    input: { branch: string; baseBranch: string; title: string; body: string; draft?: boolean },
+  ): Promise<PRInfo>;
+
+  /** Convert an existing PR to draft mode. */
+  convertPRToDraft?(pr: PRInfo): Promise<void>;
+
+  /** Mark an existing PR ready for review (exit draft mode). */
+  markPRReadyForReview?(pr: PRInfo): Promise<void>;
 
   // --- PR Lifecycle ---
 
@@ -1077,6 +1091,8 @@ export interface SessionMetadata {
   tmuxName?: string; // Globally unique tmux session name (includes hash)
   issue?: string;
   pr?: string;
+  prBranch?: string;
+  prBaseBranch?: string;
   prAutoDetect?: "on" | "off";
   summary?: string;
   project?: string;
@@ -1114,6 +1130,7 @@ export interface SessionManager {
     options?: { dryRun?: boolean; purgeOpenCode?: boolean },
   ): Promise<CleanupResult>;
   send(sessionId: SessionId, message: string): Promise<void>;
+  runCommand(sessionId: SessionId, command: string): Promise<void>;
   claimPR(sessionId: SessionId, prRef: string, options?: ClaimPROptions): Promise<ClaimPRResult>;
 }
 
@@ -1274,8 +1291,11 @@ export interface IterationState {
   status: "planning" | "building" | "reviewing" | "changes_requested" | "approved";
   startedAt: string;
   completedAt?: string;
+  iterationDir: string;
   planPath: string;
   progressPath: string;
+  orchestratorAnalysisPath: string;
+  reviewFindingsPath: string;
   architectSession?: string;
   builderSessions: string[];  // Sequential: [build-1, build-2, ...]
   reviewerSession?: string;
@@ -1286,12 +1306,20 @@ export interface WorkflowState {
   issueId: string;               // INT-123
   projectId: string;
   status: WorkflowStatus;
+  desiredStage?: WorkflowStage;
+  desiredIteration?: number;
+  desiredBuilderIteration?: number;
+  dispatchStatus?: "pending" | "running" | "completed";
+  dispatchStartedAt?: string;
+  lastStageActivityAt?: string;
   currentIteration: number;
   maxIterations: number;
   currentBuilderIteration: number;  // 0, 1, 2, 3... within current iteration
   maxBuilderIterations: number;     // e.g., 5
   branch: string;
+  baseBranch: string;
   worktreePath: string;
+  ownerSessionId: string;
   createdAt: string;
   updatedAt: string;
   iterations: IterationState[];

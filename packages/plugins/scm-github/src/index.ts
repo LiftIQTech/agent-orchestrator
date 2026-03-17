@@ -200,6 +200,46 @@ function parseProjectRepo(projectRepo: string): [string, string] {
   return [parts[0], parts[1]];
 }
 
+async function resolveExistingPRForHeadBase(
+  projectRepo: string,
+  branch: string,
+  baseBranch: string,
+): Promise<PRInfo | null> {
+  const raw = await gh([
+    "pr",
+    "list",
+    "--repo",
+    projectRepo,
+    "--head",
+    branch,
+    "--state",
+    "all",
+    "--json",
+    "number,url,title,headRefName,baseRefName,isDraft,state",
+    "--limit",
+    "20",
+  ]);
+
+  const prs: Array<{
+    number: number;
+    url: string;
+    title: string;
+    headRefName: string;
+    baseRefName: string;
+    isDraft: boolean;
+    state: string;
+  }> = JSON.parse(raw);
+
+  const match = prs.find((pr) => pr.headRefName === branch && pr.baseRefName === baseBranch);
+  if (!match) return null;
+
+  if ((match.state ?? "").toLowerCase() === "closed") {
+    await gh(["pr", "reopen", String(match.number), "--repo", projectRepo]);
+  }
+
+  return prInfoFromView(match, projectRepo);
+}
+
 function prInfoFromView(
   data: {
     number: number;
@@ -232,6 +272,112 @@ function prInfoFromView(
 function createGitHubSCM(): SCM {
   return {
     name: "github",
+
+    async createPR(
+      project: ProjectConfig,
+      input: { branch: string; baseBranch: string; title: string; body: string; draft?: boolean },
+    ): Promise<PRInfo> {
+      const [owner, repo] = parseProjectRepo(project.repo);
+
+      // Ensure branch is on remote before PR creation.
+      await git(["push", "-u", "origin", input.branch], project.path);
+
+      const args = [
+        "pr",
+        "create",
+        "--repo",
+        project.repo,
+        "--head",
+        input.branch,
+        "--base",
+        input.baseBranch,
+        "--title",
+        input.title,
+        "--body",
+        input.body,
+      ];
+      if (input.draft) {
+        args.push("--draft");
+      }
+
+      try {
+        await gh(args);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          message.includes("already exists") ||
+          message.includes("A pull request already exists")
+        ) {
+          const existing = await resolveExistingPRForHeadBase(
+            project.repo,
+            input.branch,
+            input.baseBranch,
+          );
+          if (existing) {
+            return existing;
+          }
+        }
+        throw err;
+      }
+
+      const raw = await gh([
+        "pr",
+        "list",
+        "--repo",
+        project.repo,
+        "--head",
+        input.branch,
+        "--json",
+        "number,url,title,headRefName,baseRefName,isDraft",
+        "--limit",
+        "1",
+      ]);
+
+      const prs: Array<{
+        number: number;
+        url: string;
+        title: string;
+        headRefName: string;
+        baseRefName: string;
+        isDraft: boolean;
+      }> = JSON.parse(raw);
+
+      if (prs.length === 0) {
+        throw new Error(`PR create succeeded but no PR found for branch ${input.branch}`);
+      }
+
+      return {
+        number: prs[0].number,
+        url: prs[0].url,
+        title: prs[0].title,
+        owner,
+        repo,
+        branch: prs[0].headRefName,
+        baseBranch: prs[0].baseRefName,
+        isDraft: prs[0].isDraft,
+      };
+    },
+
+    async convertPRToDraft(pr: PRInfo): Promise<void> {
+      await gh([
+        "pr",
+        "ready",
+        String(pr.number),
+        "--repo",
+        `${pr.owner}/${pr.repo}`,
+        "--undo",
+      ]);
+    },
+
+    async markPRReadyForReview(pr: PRInfo): Promise<void> {
+      await gh([
+        "pr",
+        "ready",
+        String(pr.number),
+        "--repo",
+        `${pr.owner}/${pr.repo}`,
+      ]);
+    },
 
     async detectPR(session: Session, project: ProjectConfig): Promise<PRInfo | null> {
       if (!session.branch) return null;

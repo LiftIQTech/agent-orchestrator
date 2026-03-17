@@ -49,7 +49,7 @@ function serializeMetadata(data: Record<string, string>): string {
 /** Validate sessionId to prevent path traversal. */
 const VALID_SESSION_ID = /^[a-zA-Z0-9_-]+$/;
 
-function validateSessionId(sessionId: SessionId): void {
+export function validateSessionId(sessionId: SessionId): void {
   if (!VALID_SESSION_ID.test(sessionId)) {
     throw new Error(`Invalid session ID: ${sessionId}`);
   }
@@ -78,6 +78,8 @@ export function readMetadata(dataDir: string, sessionId: SessionId): SessionMeta
     tmuxName: raw["tmuxName"],
     issue: raw["issue"],
     pr: raw["pr"],
+    prBranch: raw["prBranch"],
+    prBaseBranch: raw["prBaseBranch"],
     prAutoDetect:
       raw["prAutoDetect"] === "off" ? "off" : raw["prAutoDetect"] === "on" ? "on" : undefined,
     summary: raw["summary"],
@@ -93,6 +95,10 @@ export function readMetadata(dataDir: string, sessionId: SessionId): SessionMeta
       ? Number(raw["directTerminalWsPort"])
       : undefined,
     opencodeSessionId: raw["opencodeSessionId"],
+    workflowId: raw["workflowId"],
+    workflowStage: raw["workflowStage"],
+    workflowIteration: raw["workflowIteration"],
+    builderIteration: raw["builderIteration"],
   };
 }
 
@@ -128,6 +134,8 @@ export function writeMetadata(
   if (metadata.tmuxName) data["tmuxName"] = metadata.tmuxName;
   if (metadata.issue) data["issue"] = metadata.issue;
   if (metadata.pr) data["pr"] = metadata.pr;
+  if (metadata.prBranch) data["prBranch"] = metadata.prBranch;
+  if (metadata.prBaseBranch) data["prBaseBranch"] = metadata.prBaseBranch;
   if (metadata.prAutoDetect) data["prAutoDetect"] = metadata.prAutoDetect;
   if (metadata.summary) data["summary"] = metadata.summary;
   if (metadata.project) data["project"] = metadata.project;
@@ -142,6 +150,10 @@ export function writeMetadata(
   if (metadata.directTerminalWsPort !== undefined)
     data["directTerminalWsPort"] = String(metadata.directTerminalWsPort);
   if (metadata.opencodeSessionId) data["opencodeSessionId"] = metadata.opencodeSessionId;
+  if (metadata.workflowId) data["workflowId"] = metadata.workflowId;
+  if (metadata.workflowStage) data["workflowStage"] = metadata.workflowStage;
+  if (metadata.workflowIteration) data["workflowIteration"] = metadata.workflowIteration;
+  if (metadata.builderIteration) data["builderIteration"] = metadata.builderIteration;
 
   atomicWriteFileSync(path, serializeMetadata(data));
 }

@@ -17,9 +17,14 @@ import { banner } from "../lib/format.js";
 async function cleanupWorkflowStageSessions(
   sessionManager: Awaited<ReturnType<typeof getWorkflowDeps>>["sessionManager"],
   workflowId: string,
+  ownerSessionId?: string,
 ): Promise<number> {
   const sessions = await sessionManager.list();
-  const stageSessions = sessions.filter((session) => session.metadata["workflowId"] === workflowId);
+  const stageSessions = sessions.filter(
+    (session) =>
+      session.metadata["workflowId"] === workflowId &&
+      (!ownerSessionId || session.id !== ownerSessionId),
+  );
   let killed = 0;
   for (const session of stageSessions) {
     try {
@@ -69,6 +74,7 @@ function printWorkflowDetails(workflow: WorkflowState): void {
   console.log(`  Issue:      ${workflow.issueId}`);
   console.log(`  Project:    ${workflow.projectId}`);
   console.log(`  Branch:     ${workflow.branch}`);
+  console.log(`  Base:       ${workflow.baseBranch}`);
   console.log(`  Status:     ${formatWorkflowStatus(workflow.status)}`);
   console.log(`  Iteration:  ${workflow.currentIteration}/${workflow.maxIterations}`);
   console.log(`  Builders:   ${workflow.currentBuilderIteration}/${workflow.maxBuilderIterations}`);
@@ -137,7 +143,7 @@ export function registerWorkflow(program: Command): void {
         printWorkflowDetails(workflow);
 
         console.log();
-        console.log(chalk.green("Architect session spawned. Check PLAN.md for task creation."));
+        console.log(chalk.green("Architect stage started in workflow owner session. Check PLAN.md for task creation."));
       } catch (err) {
         console.error(chalk.red(`Failed to start workflow: ${err instanceof Error ? err.message : String(err)}`));
         process.exit(1);
@@ -270,12 +276,50 @@ export function registerWorkflow(program: Command): void {
 
       const spinner = ora("Cleaning workflow stage sessions").start();
       try {
-        const killed = await cleanupWorkflowStageSessions(sessionManager, workflowId);
+        const ownerSessionId = (workflow as unknown as { ownerSessionId?: string }).ownerSessionId;
+        const killed = await cleanupWorkflowStageSessions(
+          sessionManager,
+          workflowId,
+          ownerSessionId,
+        );
         spinner.succeed(`Cleaned ${killed} workflow stage session(s) for ${workflowId}`);
       } catch (err) {
         spinner.fail(
           `Failed to cleanup workflow sessions: ${err instanceof Error ? err.message : String(err)}`,
         );
+        process.exit(1);
+      }
+    });
+
+  workflow
+    .command("resume")
+    .description("Resume a workflow from persisted state")
+    .argument("<project>", "Project ID from config")
+    .argument("<issue>", "Issue identifier")
+    .action(async (projectId: string, issueId: string) => {
+      const config = loadConfig();
+      const project = config.projects[projectId];
+
+      if (!project) {
+        console.error(chalk.red(`Unknown project: ${projectId}`));
+        process.exit(1);
+      }
+
+      try {
+        await runWorkflowPreflight(config, projectId);
+        await ensureLifecycleWorker(config, projectId);
+
+        const { registry, sessionManager } = await getWorkflowDeps(config);
+        const wm = createWorkflowManager({ config, registry, sessionManager });
+        const workflowId = `wf-${issueId}`;
+
+        const spinner = ora(`Resuming workflow ${workflowId}`).start();
+        const workflow = await wm.resumeWorkflow(workflowId);
+        spinner.succeed(`Workflow resumed: ${workflowId}`);
+
+        printWorkflowDetails(workflow);
+      } catch (err) {
+        console.error(chalk.red(`Failed to resume workflow: ${err instanceof Error ? err.message : String(err)}`));
         process.exit(1);
       }
     });

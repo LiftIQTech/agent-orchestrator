@@ -71,10 +71,37 @@ export function Dashboard({
   }, [sessions]);
 
   const openPRs = useMemo(() => {
-    return sessions
-      .filter((s): s is DashboardSession & { pr: DashboardPR } => s.pr?.state === "open")
-      .map((s) => s.pr)
-      .sort((a, b) => mergeScore(a) - mergeScore(b));
+    const byNumber = new Map<number, DashboardPR>();
+    for (const session of sessions) {
+      if (session.pr?.state !== "open") continue;
+      const existing = byNumber.get(session.pr.number);
+      if (!existing) {
+        byNumber.set(session.pr.number, session.pr);
+        continue;
+      }
+
+      const existingNeedsAction = prNeedsReview(existing);
+      const candidateNeedsAction = prNeedsReview(session.pr);
+      if (candidateNeedsAction !== existingNeedsAction) {
+        if (candidateNeedsAction) byNumber.set(session.pr.number, session.pr);
+        continue;
+      }
+
+      const existingSignal = prSignalScore(existing);
+      const candidateSignal = prSignalScore(session.pr);
+      if (candidateSignal !== existingSignal) {
+        if (candidateSignal > existingSignal) byNumber.set(session.pr.number, session.pr);
+        continue;
+      }
+
+      const existingSize = (existing.additions ?? 0) + (existing.deletions ?? 0);
+      const candidateSize = (session.pr.additions ?? 0) + (session.pr.deletions ?? 0);
+      if (candidateSize > existingSize) {
+        byNumber.set(session.pr.number, session.pr);
+      }
+    }
+
+    return [...byNumber.values()].sort((a, b) => mergeScore(a) - mergeScore(b));
   }, [sessions]);
 
   // Fetch backlog issues
@@ -862,5 +889,23 @@ function mergeScore(
   if (pr.reviewDecision === "changes_requested") score += 20;
   else if (pr.reviewDecision !== "approved") score += 10;
   score += pr.unresolvedThreads * 5;
+  return score;
+}
+
+function prNeedsReview(pr: Pick<DashboardPR, "isDraft" | "reviewDecision">): boolean {
+  return !pr.isDraft && (pr.reviewDecision === "pending" || pr.reviewDecision === "none");
+}
+
+function prSignalScore(
+  pr: Pick<DashboardPR, "isDraft" | "reviewDecision" | "ciStatus" | "unresolvedThreads" | "additions" | "deletions">,
+): number {
+  let score = 0;
+  if (!pr.isDraft) score += 4;
+  if (pr.reviewDecision === "approved") score += 3;
+  else if (pr.reviewDecision === "pending" || pr.reviewDecision === "none") score += 2;
+  if (pr.ciStatus === CI_STATUS.PASSING) score += 2;
+  else if (pr.ciStatus === CI_STATUS.FAILING) score += 1;
+  score += Math.min(pr.unresolvedThreads, 5);
+  score += Math.min((pr.additions ?? 0) + (pr.deletions ?? 0), 20) / 100;
   return score;
 }

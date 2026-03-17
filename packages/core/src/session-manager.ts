@@ -52,6 +52,7 @@ import {
   deleteMetadata,
   listMetadata,
   reserveSessionId,
+  validateSessionId,
 } from "./metadata.js";
 import { buildPrompt } from "./prompt-builder.js";
 import {
@@ -327,7 +328,12 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
       const files = readdirSync(sessionsDir);
       for (const file of files) {
-        if (file === "archive" || file.startsWith(".")) continue;
+        if (file === "archive" || file.startsWith(".") || file.includes(".tmp.")) continue;
+        try {
+          validateSessionId(file as SessionId);
+        } catch {
+          continue;
+        }
         const fullPath = join(sessionsDir, file);
         try {
           if (statSync(fullPath).isFile()) {
@@ -630,7 +636,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
     // Validate issue exists BEFORE creating any resources
     let resolvedIssue: Issue | undefined;
-    if (spawnConfig.issueId && plugins.tracker) {
+    if (spawnConfig.issueId && plugins.tracker && !spawnConfig.skipIssueValidation) {
       try {
         // Fetch and validate the issue exists
         resolvedIssue = await plugins.tracker.getIssue(spawnConfig.issueId, project);
@@ -746,7 +752,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
     // Generate prompt with validated issue
     let issueContext: string | undefined;
-    if (spawnConfig.issueId && plugins.tracker && resolvedIssue) {
+    if (spawnConfig.issueId && plugins.tracker && resolvedIssue && !spawnConfig.workflowId) {
       try {
         issueContext = await plugins.tracker.generatePrompt(spawnConfig.issueId, project);
       } catch {
@@ -755,20 +761,24 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       }
     }
 
-    const composedPrompt = buildPrompt({
-      project,
-      projectId: spawnConfig.projectId,
-      issueId: spawnConfig.issueId,
-      issueContext,
-      userPrompt: spawnConfig.prompt,
-      lineage: spawnConfig.lineage,
-      siblings: spawnConfig.siblings,
-    });
+    const promptIssueId = spawnConfig.workflowId ? undefined : spawnConfig.issueId;
+
+    const composedPrompt = spawnConfig.workflowId
+      ? undefined
+      : buildPrompt({
+          project,
+          projectId: spawnConfig.projectId,
+          issueId: promptIssueId,
+          issueContext,
+          userPrompt: spawnConfig.prompt,
+          lineage: spawnConfig.lineage,
+          siblings: spawnConfig.siblings,
+        });
 
     // Get agent launch config and create runtime — clean up workspace on failure
     const opencodeIssueSessionStrategy = project.opencodeIssueSessionStrategy ?? "reuse";
     const reusedOpenCodeSessionId =
-      plugins.agent.name === "opencode" && spawnConfig.issueId
+      plugins.agent.name === "opencode" && spawnConfig.issueId && !spawnConfig.workflowId
         ? await resolveOpenCodeSessionReuse({
             sessionsDir,
             criteria: { issueId: spawnConfig.issueId },
@@ -848,6 +858,10 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       createdAt: new Date(),
       lastActivityAt: new Date(),
       metadata: {
+        ...(spawnConfig.workflowId ? { workflowId: spawnConfig.workflowId } : {}),
+        ...(spawnConfig.workflowStage ? { workflowStage: spawnConfig.workflowStage } : {}),
+        ...(spawnConfig.workflowIteration ? { workflowIteration: String(spawnConfig.workflowIteration) } : {}),
+        ...(spawnConfig.builderIteration ? { builderIteration: String(spawnConfig.builderIteration) } : {}),
         ...(reusedOpenCodeSessionId ? { opencodeSessionId: reusedOpenCodeSessionId } : {}),
       },
     };
@@ -859,6 +873,12 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         status: "spawning",
         tmuxName, // Store tmux name for mapping
         issue: spawnConfig.issueId,
+        workflowId: spawnConfig.workflowId,
+        workflowStage: spawnConfig.workflowStage,
+        workflowIteration:
+          spawnConfig.workflowIteration !== undefined ? String(spawnConfig.workflowIteration) : undefined,
+        builderIteration:
+          spawnConfig.builderIteration !== undefined ? String(spawnConfig.builderIteration) : undefined,
         project: spawnConfig.projectId,
         agent: plugins.agent.name, // Persist agent name for lifecycle manager
         createdAt: new Date().toISOString(),
@@ -1708,6 +1728,30 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     }
   }
 
+  async function runCommand(sessionId: SessionId, command: string): Promise<void> {
+    const session = await get(sessionId);
+    if (!session) {
+      throw new SessionNotFoundError(sessionId);
+    }
+
+    if (!session.runtimeHandle) {
+      throw new Error(`Session ${sessionId} has no runtime handle`);
+    }
+
+    const project = config.projects[session.projectId];
+    if (!project) {
+      throw new Error(`Unknown project for session ${sessionId}: ${session.projectId}`);
+    }
+
+    const runtimeName = session.runtimeHandle.runtimeName ?? project.runtime ?? config.defaults.runtime;
+    const runtimePlugin = registry.get<Runtime>("runtime", runtimeName);
+    if (!runtimePlugin) {
+      throw new Error(`Runtime plugin '${runtimeName}' not found`);
+    }
+
+    await runtimePlugin.sendMessage(session.runtimeHandle, command);
+  }
+
   async function claimPR(
     sessionId: SessionId,
     prRef: string,
@@ -1762,6 +1806,8 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
     updateMetadata(sessionsDir, sessionId, {
       pr: pr.url,
+      prBranch: pr.branch,
+      prBaseBranch: pr.baseBranch,
       status: "pr_open",
       branch: pr.branch,
       prAutoDetect: "",
@@ -1773,6 +1819,8 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
       updateMetadata(sessionsDir, previousSessionId, {
         pr: "",
+        prBranch: "",
+        prBaseBranch: "",
         prAutoDetect: "off",
         ...(PR_TRACKING_STATUSES.has(previousRaw["status"] ?? "") ? { status: "working" } : {}),
       });
@@ -1885,10 +1933,14 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     //    and isRestorable would reject it.
     const session = metadataToSession(sessionId, raw);
     const plugins = resolvePlugins(project, raw["agent"]);
+    let workspacePath = raw["worktree"] || project.path;
+    const workspaceExists = plugins.workspace?.exists
+      ? await plugins.workspace.exists(workspacePath)
+      : existsSync(workspacePath);
     await enrichSessionWithRuntimeState(session, plugins, true);
 
     // 3. Validate restorability
-    if (!isRestorable(session)) {
+    if (!isRestorable(session) && workspaceExists) {
       if (NON_RESTORABLE_STATUSES.has(session.status)) {
         throw new SessionNotRestorableError(sessionId, `status is "${session.status}"`);
       }
@@ -1904,6 +1956,8 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         tmuxName: raw["tmuxName"],
         issue: raw["issue"],
         pr: raw["pr"],
+        prBranch: raw["prBranch"],
+        prBaseBranch: raw["prBaseBranch"],
         prAutoDetect:
           raw["prAutoDetect"] === "off" ? "off" : raw["prAutoDetect"] === "on" ? "on" : undefined,
         summary: raw["summary"],
@@ -1924,11 +1978,6 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     }
 
     // 5. Check workspace
-    const workspacePath = raw["worktree"] || project.path;
-    const workspaceExists = plugins.workspace?.exists
-      ? await plugins.workspace.exists(workspacePath)
-      : existsSync(workspacePath);
-
     if (!workspaceExists) {
       // Try to restore workspace if plugin supports it
       if (!plugins.workspace?.restore) {
@@ -1947,6 +1996,8 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
           },
           workspacePath,
         );
+        workspacePath = wsInfo.path;
+        session.workspacePath = wsInfo.path;
 
         // Run post-create hooks on restored workspace
         if (plugins.workspace.postCreate) {
@@ -2023,6 +2074,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     const now = new Date().toISOString();
     updateMetadata(sessionsDir, sessionId, {
       status: "spawning",
+      worktree: workspacePath,
       runtimeHandle: JSON.stringify(handle),
       restoredAt: now,
     });
@@ -2060,5 +2112,17 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     return restoredSession;
   }
 
-  return { spawn, spawnOrchestrator, restore, list, get, kill, cleanup, send, claimPR, remap };
+  return {
+    spawn,
+    spawnOrchestrator,
+    restore,
+    list,
+    get,
+    kill,
+    cleanup,
+    send,
+    runCommand,
+    claimPR,
+    remap,
+  };
 }

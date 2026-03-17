@@ -43,6 +43,10 @@ function collapseWorkflowStatusSessions(sessions: Session[]): Session[] {
   const chosen = new Set<string>();
   for (const grouped of byWorkflow.values()) {
     grouped.sort((a, b) => {
+      const aTerminal = isTerminalSession(a) || a.status === "ci_failed";
+      const bTerminal = isTerminalSession(b) || b.status === "ci_failed";
+      if (aTerminal !== bTerminal) return aTerminal ? 1 : -1;
+
       const aRank = stageRank[a.metadata["workflowStage"] ?? ""] ?? 0;
       const bRank = stageRank[b.metadata["workflowStage"] ?? ""] ?? 0;
       if (aRank !== bRank) return bRank - aRank;
@@ -127,7 +131,12 @@ async function gatherSessionInfo(
     }
   }
 
-  if (branch) {
+  const isWorkflowHostShell =
+    session.metadata["agent"] === "host-shell" &&
+    typeof session.metadata["workflowId"] === "string" &&
+    session.metadata["workflowId"].length > 0;
+
+  if (branch && !isWorkflowHostShell) {
     try {
       const project = projectConfig.projects[session.projectId];
       if (project) {

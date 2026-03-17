@@ -5,15 +5,16 @@
  * (string dates, flattened DashboardPR) suitable for JSON serialization.
  */
 
-import type {
-  Session,
-  Agent,
-  SCM,
-  PRInfo,
-  Tracker,
-  ProjectConfig,
-  OrchestratorConfig,
-  PluginRegistry,
+import {
+  isTerminalSession,
+  type Session,
+  type Agent,
+  type SCM,
+  type PRInfo,
+  type Tracker,
+  type ProjectConfig,
+  type OrchestratorConfig,
+  type PluginRegistry,
 } from "@composio/ao-core";
 import type { DashboardSession, DashboardPR, DashboardStats } from "./types.js";
 import { TTLCache, prCache, prCacheKey, type PREnrichmentData } from "./cache";
@@ -95,6 +96,10 @@ export function collapseWorkflowSessions(sessions: Session[]): Session[] {
   const representatives: Session[] = [];
   for (const group of byWorkflow.values()) {
     const sorted = [...group].sort((a, b) => {
+      const aTerminal = isTerminalSession(a) || a.status === "ci_failed";
+      const bTerminal = isTerminalSession(b) || b.status === "ci_failed";
+      if (aTerminal !== bTerminal) return aTerminal ? 1 : -1;
+
       const aRank = WORKFLOW_STAGE_RANK[a.metadata["workflowStage"] ?? ""] ?? 0;
       const bRank = WORKFLOW_STAGE_RANK[b.metadata["workflowStage"] ?? ""] ?? 0;
       if (aRank !== bRank) return bRank - aRank;
@@ -429,11 +434,28 @@ export async function enrichSessionsMetadata(
 
 /** Compute dashboard stats from a list of sessions. */
 export function computeStats(sessions: DashboardSession[]): DashboardStats {
+  const uniqueOpenPrs = new Set(
+    sessions
+      .filter((s): s is DashboardSession & { pr: DashboardPR } => s.pr?.state === "open")
+      .map((s) => s.pr.number),
+  );
+
+  const uniqueNeedsReviewPrs = new Set(
+    sessions
+      .filter(
+        (s): s is DashboardSession & { pr: DashboardPR } =>
+          !!s.pr &&
+          s.pr.state === "open" &&
+          !s.pr.isDraft &&
+          s.pr.reviewDecision === "pending",
+      )
+      .map((s) => s.pr.number),
+  );
+
   return {
     totalSessions: sessions.length,
     workingSessions: sessions.filter((s) => s.activity !== null && s.activity !== "exited").length,
-    openPRs: sessions.filter((s) => s.pr?.state === "open").length,
-    needsReview: sessions.filter((s) => s.pr && !s.pr.isDraft && s.pr.reviewDecision === "pending")
-      .length,
+    openPRs: uniqueOpenPrs.size,
+    needsReview: uniqueNeedsReviewPrs.size,
   };
 }

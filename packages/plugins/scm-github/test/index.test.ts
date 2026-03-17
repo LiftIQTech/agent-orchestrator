@@ -170,6 +170,20 @@ describe("scm-github plugin", () => {
     });
   });
 
+  describe("markPRReadyForReview", () => {
+    it("marks a draft PR ready for review", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "" });
+
+      await scm.markPRReadyForReview?.({ ...pr, isDraft: true });
+
+      expect(ghMock).toHaveBeenCalledWith(
+        "gh",
+        ["pr", "ready", "42", "--repo", "acme/repo"],
+        expect.any(Object),
+      );
+    });
+  });
+
   // ---- getPRState --------------------------------------------------------
 
   describe("getPRState", () => {
