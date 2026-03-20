@@ -29,6 +29,7 @@ import {
   type Runtime,
   type Agent,
   type SCM,
+  type CICheck,
   type Notifier,
   type Session,
   type EventPriority,
@@ -631,6 +632,19 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     return [...ids].sort().join(",");
   }
 
+  function normalizeFailingChecks(checks: CICheck[]): string[] {
+    return checks
+      .filter((check) => check.status === "failed")
+      .map((check) => check.name.trim())
+      .sort();
+  }
+
+  function sameStringArray(a: string[] | undefined, b: string[]): boolean {
+    if (!a) return false;
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => value === b[index]);
+  }
+
   async function maybeDispatchReviewBacklog(
     session: Session,
     oldStatus: SessionStatus,
@@ -911,8 +925,8 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       
       for (const listedWorkflow of workflows) {
         let workflow = listedWorkflow;
-        // Skip completed/failed workflows
-        if (workflow.status === "completed" || workflow.status === "failed") continue;
+        // Skip failed workflows; completed workflows are still monitored for PR follow-up.
+        if (workflow.status === "failed") continue;
 
         // Deterministic guard: workflow sessions must stay on workflow.branch
         const workflowSessions = sessions.filter((s) => s.metadata["workflowId"] === workflow.id);
@@ -935,6 +949,105 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         
         let iteration = workflow.iterations[workflow.currentIteration - 1];
         if (!iteration) continue;
+
+        if (workflow.status === "completed" && project.scm && workflow.artifacts.prs.length > 0) {
+          const scm = registry.get<SCM>("scm", project.scm.plugin);
+          if (!scm?.resolvePR) {
+            continue;
+          }
+
+          try {
+            const pr = await scm.resolvePR(workflow.artifacts.prs.at(-1)!, project);
+            const syntheticSession: Session = {
+              id: `${project.sessionPrefix}-workflow-${workflow.issueId}`,
+              projectId,
+              status: "pr_open",
+              activity: "active",
+              branch: workflow.branch,
+              issueId: workflow.issueId,
+              pr,
+              workspacePath: workflow.worktreePath,
+              runtimeHandle: null,
+              agentInfo: null,
+              createdAt: new Date(workflow.createdAt),
+              lastActivityAt: new Date(),
+              metadata: {
+                workflowId: workflow.id,
+                status: "pr_open",
+                pr: pr.url,
+              },
+            };
+
+            const ciStatus = await scm.getCISummary(pr).catch(() => "none");
+            if (ciStatus === "failing") {
+              const reactionConfig = getReactionConfigForSession(syntheticSession, "ci-failed");
+              if (reactionConfig?.auto !== false) {
+                const checks = await scm.getCIChecks(pr).catch(() => []);
+                const failingCheckNames = normalizeFailingChecks(checks);
+                if (
+                  workflow.status !== "completed" &&
+                  sameStringArray(workflow.lastSeenFailingChecks, failingCheckNames)
+                ) {
+                  continue;
+                }
+                const failingChecks = checks
+                  .filter((check) => check.status === "failed")
+                  .map((check) => `- ${check.name}${check.url ? `: ${check.url}` : ""}`)
+                  .join("\n");
+                const reason = [
+                  "Automated follow-up triggered because CI is failing on the workflow PR.",
+                  failingChecks ? `\nFailing checks:\n${failingChecks}` : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+                workflow = await wm.reopenWorkflow(workflow.id, reason, "builder");
+                workflow.lastSeenFailingChecks = failingCheckNames;
+                saveWorkflowState(config.configPath, project.path, workflow);
+                iteration = workflow.iterations[workflow.currentIteration - 1] ?? iteration;
+              }
+            }
+
+            if (workflow.status === "completed") {
+              const pendingComments = await scm.getPendingComments(pr).catch(() => null);
+              if (Array.isArray(pendingComments) && pendingComments.length > 0) {
+                const reactionConfig = getReactionConfigForSession(syntheticSession, "changes-requested");
+                if (reactionConfig?.auto !== false) {
+                  const reason = [
+                    "Automated follow-up triggered because unresolved human review comments were found on the workflow PR.",
+                    ...pendingComments.map((comment) =>
+                      `- ${comment.author}${comment.path ? ` ${comment.path}${comment.line ? `:${comment.line}` : ""}` : ""}: ${comment.body}`,
+                    ),
+                  ].join("\n");
+                  workflow = await wm.reopenWorkflow(workflow.id, reason, "architect");
+                  iteration = workflow.iterations[workflow.currentIteration - 1] ?? iteration;
+                }
+              }
+            }
+
+            if (workflow.status === "completed") {
+              const automatedComments = await scm.getAutomatedComments(pr).catch(() => null);
+              if (Array.isArray(automatedComments) && automatedComments.length > 0) {
+                const reactionConfig = getReactionConfigForSession(syntheticSession, "bugbot-comments");
+                if (reactionConfig?.auto !== false) {
+                  const reason = [
+                    "Automated follow-up triggered because automated review comments were found on the workflow PR.",
+                    ...automatedComments.map((comment) =>
+                      `- ${comment.botName}${comment.path ? ` ${comment.path}${comment.line ? `:${comment.line}` : ""}` : ""}: ${comment.body}`,
+                    ),
+                  ].join("\n");
+                  workflow = await wm.reopenWorkflow(workflow.id, reason, "builder");
+                  iteration = workflow.iterations[workflow.currentIteration - 1] ?? iteration;
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[ao lifecycle] Failed to evaluate completed workflow follow-up for ${workflow.id}:`, err);
+          }
+        }
+
+        if (workflow.status === "completed") {
+          continue;
+        }
 
         const ownerSession = workflow.ownerSessionId
           ? sessions.find((s) => s.id === workflow.ownerSessionId)
@@ -1092,6 +1205,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
             }
           }
         }
+
       }
     }
   }

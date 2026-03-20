@@ -1327,6 +1327,9 @@ export interface WorkflowState {
     prs: string[];
     mergedPRs: string[];
   };
+  lastReopenReason?: string;
+  lastReopenAt?: string;
+  lastSeenFailingChecks?: string[];
 }
 
 export interface WorkflowConfig {

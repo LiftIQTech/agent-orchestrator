@@ -3262,6 +3262,49 @@ describe("restore", () => {
     expect(meta!["createdAt"]).toBe("2025-01-01T00:00:00.000Z");
   });
 
+  it("reuses an existing restored workspace when the branch already matches", async () => {
+    const wsPath = join(tmpDir, "ws-app-existing");
+    mkdirSync(wsPath, { recursive: true });
+
+    const reusableWorkspace: Workspace = {
+      ...mockWorkspace,
+      exists: vi.fn().mockResolvedValue(true),
+      restore: vi.fn().mockResolvedValue({
+        path: wsPath,
+        branch: "feat/TEST-1",
+        sessionId: "app-1",
+        projectId: "my-app",
+      }),
+    };
+
+    const registryWithRestore: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "workspace") return reusableWorkspace;
+        return null;
+      }),
+    };
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: wsPath,
+      branch: "feat/TEST-1",
+      status: "killed",
+      project: "my-app",
+      issue: "TEST-1",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      runtimeHandle: JSON.stringify(makeHandle("rt-old")),
+    });
+
+    const sm = createSessionManager({ config, registry: registryWithRestore });
+    const restored = await sm.restore("app-1");
+
+    expect(reusableWorkspace.restore).not.toHaveBeenCalled();
+    expect(restored.workspacePath).toBe(wsPath);
+    expect(mockRuntime.create).toHaveBeenCalledTimes(1);
+  });
+
   it("continues restore even if old runtime destroy fails", async () => {
     const wsPath = join(tmpDir, "ws-app-1");
     mkdirSync(wsPath, { recursive: true });

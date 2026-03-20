@@ -8,7 +8,7 @@ import { createSessionManager } from "../session-manager.js";
 import { writeMetadata, readMetadataRaw } from "../metadata.js";
 import { getSessionsDir, getProjectBaseDir } from "../paths.js";
 import { createWorkflowManager } from "../workflow-manager.js";
-import { createWorkflowState, saveWorkflowState } from "../workflow-state.js";
+import { createWorkflowState, loadWorkflowState, saveWorkflowState } from "../workflow-state.js";
 import type {
   OrchestratorConfig,
   PluginRegistry,
@@ -802,6 +802,322 @@ describe("workflow iteration rollover", () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it("reopens a completed workflow when its PR has failing CI", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    config.projects["my-app"]!.tracker = { plugin: "mock-tracker" };
+    config.projects["my-app"]!.scm = { plugin: "mock-scm" };
+    config.projects["my-app"]!.workflow = {
+      enabled: true,
+      builders: { maxIterations: 5, tasksPerBuilder: 3 },
+      iterations: { maxIterations: 3, autoMergeOnApproval: false },
+    };
+
+    const worktreePath = join(tmpDir, "reopen-completed-workflow");
+    const iterationDir = join(
+      worktreePath,
+      ".architect-delivery",
+      "projects",
+      "issue-950",
+      "iterations",
+      "iteration-003",
+    );
+    mkdirSync(worktreePath, { recursive: true });
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "950",
+      "feat/950",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.status = "completed";
+    workflow.currentIteration = 3;
+    workflow.ownerSessionId = "";
+    workflow.artifacts.prs = ["https://github.com/org/repo/pull/950"];
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: [],
+      },
+      {
+        number: 2,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: [],
+      },
+      {
+        number: 3,
+        status: "approved",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir,
+        planPath: join(iterationDir, "PLAN.md"),
+        progressPath: join(iterationDir, "PROGRESS.md"),
+        orchestratorAnalysisPath: join(iterationDir, "orchestrator-analysis.md"),
+        reviewFindingsPath: join(iterationDir, "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-1"],
+        reviewerSession: "app-1",
+      },
+    ];
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    const mockTracker = {
+      name: "mock-tracker",
+      updateIssue: vi.fn().mockResolvedValue(undefined),
+    };
+    const resolvedPr = makePR({ number: 950, url: "https://github.com/org/repo/pull/950", branch: "feat/950", isDraft: false });
+    const mockSCM: SCM = {
+      name: "mock-scm",
+      detectPR: vi.fn(),
+      resolvePR: vi.fn().mockResolvedValue(resolvedPr),
+      convertPRToDraft: vi.fn().mockResolvedValue(undefined),
+      mergePR: vi.fn(),
+      closePR: vi.fn(),
+      getPRState: vi.fn().mockResolvedValue("open"),
+      getCIChecks: vi.fn().mockResolvedValue([
+        { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
+      ]),
+      getCISummary: vi.fn().mockResolvedValue("failing"),
+      getReviews: vi.fn().mockResolvedValue([]),
+      getReviewDecision: vi.fn().mockResolvedValue("none"),
+      getPendingComments: vi.fn().mockResolvedValue([]),
+      getAutomatedComments: vi.fn().mockResolvedValue([]),
+      getMergeability: vi.fn().mockResolvedValue({ mergeable: false, ciPassing: false, approved: false, noConflicts: true, blockers: ["CI is failing"] }),
+    };
+
+    const registryWithTrackerAndScm: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "tracker") return mockTracker;
+        if (slot === "scm") return mockSCM;
+        if (slot === "workspace") return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
+        return null;
+      }),
+    };
+
+    const replacement = makeSession({
+      id: "app-9",
+      status: "spawning",
+      branch: "feat/950",
+      workspacePath: worktreePath,
+      metadata: {
+        workflowId: workflow.id,
+        workflowStage: "builder",
+        workflowIteration: "3",
+        builderIteration: "1",
+        agent: "host-shell",
+      },
+    });
+
+    vi.mocked(mockSessionManager.list).mockResolvedValue([
+      makeSession({
+        id: "pr-monitor",
+        status: "pr_open",
+        projectId: "my-app",
+        branch: "feat/950",
+        issueId: "950",
+        pr: resolvedPr,
+        workspacePath: worktreePath,
+      }),
+    ]);
+    vi.mocked(mockSessionManager.get).mockResolvedValueOnce(replacement).mockResolvedValue(replacement);
+    vi.mocked(mockSessionManager.spawn).mockResolvedValue(replacement);
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithTrackerAndScm,
+      sessionManager: mockSessionManager,
+    });
+
+    lm.start(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    lm.stop();
+
+    const reopened = loadWorkflowState(config.configPath, projectPath, workflow.id);
+    expect(reopened?.status).toBe("building");
+    expect(reopened?.desiredStage).toBe("builder");
+    expect(existsSync(join(iterationDir, "review-feedback.md"))).toBe(true);
+    expect(mockTracker.updateIssue).toHaveBeenCalledWith(
+      "950",
+      expect.objectContaining({
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:pending-merge", "agent:backlog"],
+      }),
+      expect.any(Object),
+    );
+    expect(mockSCM.convertPRToDraft).toHaveBeenCalledWith(expect.objectContaining({ number: 950 }));
+    expect(mockSessionManager.spawn).toHaveBeenCalled();
+    expect(mockSessionManager.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not repeatedly reopen an already-active workflow for the same failing CI checks", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    config.projects["my-app"]!.tracker = { plugin: "mock-tracker" };
+    config.projects["my-app"]!.scm = { plugin: "mock-scm" };
+    config.projects["my-app"]!.workflow = {
+      enabled: true,
+      builders: { maxIterations: 5, tasksPerBuilder: 3 },
+      iterations: { maxIterations: 3, autoMergeOnApproval: false },
+    };
+
+    const worktreePath = join(tmpDir, "same-ci-active-workflow");
+    const iterationDir = join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-003");
+    mkdirSync(iterationDir, { recursive: true });
+    writeFileSync(join(iterationDir, "PLAN.md"), "- [x] TASK-01: done\n", "utf-8");
+    writeFileSync(join(iterationDir, "PROGRESS.md"), "done\n", "utf-8");
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "951",
+      "feat/951",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.status = "building";
+    workflow.currentIteration = 3;
+    workflow.ownerSessionId = "app-10";
+    workflow.desiredStage = "builder";
+    workflow.desiredIteration = 3;
+    workflow.desiredBuilderIteration = 1;
+    workflow.dispatchStatus = "running";
+    workflow.artifacts.prs = ["https://github.com/org/repo/pull/951"];
+    workflow.lastSeenFailingChecks = ["Unit Tests"];
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: [],
+      },
+      {
+        number: 2,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: [],
+      },
+      {
+        number: 3,
+        status: "building",
+        startedAt: new Date().toISOString(),
+        iterationDir,
+        planPath: join(iterationDir, "PLAN.md"),
+        progressPath: join(iterationDir, "PROGRESS.md"),
+        orchestratorAnalysisPath: join(iterationDir, "orchestrator-analysis.md"),
+        reviewFindingsPath: join(iterationDir, "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-10"],
+      },
+    ];
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    const resolvedPr = makePR({ number: 951, url: "https://github.com/org/repo/pull/951", branch: "feat/951", isDraft: true });
+    const mockSCM: SCM = {
+      name: "mock-scm",
+      detectPR: vi.fn(),
+      resolvePR: vi.fn().mockResolvedValue(resolvedPr),
+      convertPRToDraft: vi.fn().mockResolvedValue(undefined),
+      mergePR: vi.fn(),
+      closePR: vi.fn(),
+      getPRState: vi.fn().mockResolvedValue("open"),
+      getCIChecks: vi.fn().mockResolvedValue([
+        { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
+      ]),
+      getCISummary: vi.fn().mockResolvedValue("failing"),
+      getReviews: vi.fn().mockResolvedValue([]),
+      getReviewDecision: vi.fn().mockResolvedValue("none"),
+      getPendingComments: vi.fn().mockResolvedValue([]),
+      getAutomatedComments: vi.fn().mockResolvedValue([]),
+      getMergeability: vi.fn().mockResolvedValue({ mergeable: false, ciPassing: false, approved: false, noConflicts: true, blockers: ["CI is failing"] }),
+    };
+
+    const registryWithScm: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "scm") return mockSCM;
+        if (slot === "tracker") return { name: "mock-tracker", updateIssue: vi.fn().mockResolvedValue(undefined) };
+        if (slot === "workspace") return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
+        return null;
+      }),
+    };
+
+    vi.mocked(mockSessionManager.list).mockResolvedValue([
+      makeSession({
+        id: "pr-monitor",
+        status: "pr_open",
+        projectId: "my-app",
+        branch: "feat/951",
+        issueId: "951",
+        pr: resolvedPr,
+        workspacePath: worktreePath,
+      }),
+      makeSession({
+        id: "app-10",
+        status: "working",
+        projectId: "my-app",
+        branch: "feat/951",
+        issueId: "951",
+        workspacePath: worktreePath,
+        metadata: {
+          workflowId: workflow.id,
+          workflowStage: "builder",
+          workflowIteration: "3",
+          builderIteration: "1",
+          agent: "host-shell",
+        },
+      }),
+    ]);
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithScm,
+      sessionManager: mockSessionManager,
+    });
+
+    lm.start(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    lm.stop();
+
+    const current = loadWorkflowState(config.configPath, projectPath, workflow.id);
+    expect(current?.status).toBe("building");
+    expect(current?.ownerSessionId).toBe("app-10");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
   });
 
   it("resumeWorkflow can recover a failed non-terminal workflow that still has pending builder work", async () => {
@@ -1638,9 +1954,184 @@ describe("workflow iteration rollover", () => {
         workflowStage: "builder",
         workflowIteration: 1,
         builderIteration: 2,
+        workspacePath: worktreePath,
       }),
     );
   }, 15000);
+
+  it("reuses the persisted workflow worktree when respawning a missing owner session", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    const worktreePath = join(tmpDir, "resume-existing-worktree");
+    mkdirSync(
+      join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002"),
+      { recursive: true },
+    );
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "916",
+      "feat/916-from-main",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.currentIteration = 2;
+    workflow.status = "reviewing";
+    workflow.desiredStage = "reviewer";
+    workflow.desiredIteration = 2;
+    workflow.dispatchStatus = "pending";
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "approved",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-1"],
+        architectSession: "app-1",
+        reviewerSession: "app-1",
+      },
+      {
+        number: 2,
+        status: "reviewing",
+        startedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-2"],
+        reviewerSession: "app-2",
+      },
+    ];
+    writeFileSync(workflow.iterations[1]!.planPath, "# PLAN\n\n- [x] TASK-01: Implemented\n", "utf-8");
+    writeFileSync(workflow.iterations[1]!.progressPath, "# Progress - Iteration 2\n\n- done\n", "utf-8");
+    writeFileSync(workflow.iterations[1]!.reviewFindingsPath, "(Pending reviewer output)\n", "utf-8");
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    const replacement = makeSession({
+      id: "app-3",
+      status: "spawning",
+      branch: "feat/916-from-main",
+      workspacePath: worktreePath,
+      metadata: {
+        workflowId: workflow.id,
+        workflowStage: "reviewer",
+        workflowIteration: "2",
+        agent: "host-shell",
+      },
+    });
+
+    vi.mocked(mockSessionManager.get).mockResolvedValueOnce(null).mockResolvedValue(replacement);
+    vi.mocked(mockSessionManager.spawn).mockResolvedValue(replacement);
+
+    const wm = createWorkflowManager({
+      config,
+      registry: mockRegistry,
+      sessionManager: mockSessionManager,
+    });
+
+    await wm.resumeWorkflow("wf-916");
+
+    expect(mockSessionManager.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: "wf-916",
+        workflowStage: "reviewer",
+        workflowIteration: 2,
+        workspacePath: worktreePath,
+      }),
+    );
+  });
+
+  it("resumeWorkflow dispatches reviewer work when review findings are still missing", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    const worktreePath = join(tmpDir, "resume-reviewer-worktree");
+    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002"), { recursive: true });
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "917",
+      "feat/917-from-main",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.ownerSessionId = "app-7";
+    workflow.currentIteration = 2;
+    workflow.status = "reviewing";
+    workflow.desiredStage = "reviewer";
+    workflow.desiredIteration = 2;
+    workflow.dispatchStatus = "pending";
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-6"],
+        architectSession: "app-5",
+        reviewerSession: "app-6",
+      },
+      {
+        number: 2,
+        status: "reviewing",
+        startedAt: new Date().toISOString(),
+        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002"),
+        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "PLAN.md"),
+        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "PROGRESS.md"),
+        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "orchestrator-analysis.md"),
+        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        builderSessions: ["app-7"],
+        reviewerSession: "app-7",
+      },
+    ];
+
+    writeFileSync(workflow.iterations[1]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
+    writeFileSync(workflow.iterations[1]!.progressPath, "# Progress - Iteration 2\n\n- done\n", "utf-8");
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    const restoredReviewer = makeSession({
+      id: "app-7",
+      status: "spawning",
+      activity: "ready",
+      branch: "feat/917-from-main",
+      workspacePath: worktreePath,
+      metadata: {
+        workflowId: workflow.id,
+        workflowStage: "reviewer",
+        workflowIteration: "2",
+        agent: "host-shell",
+      },
+    });
+
+    vi.mocked(mockSessionManager.get).mockResolvedValue(restoredReviewer);
+
+    const wm = createWorkflowManager({
+      config,
+      registry: mockRegistry,
+      sessionManager: mockSessionManager,
+    });
+
+    const resumed = await wm.resumeWorkflow("wf-917");
+
+    expect(resumed.status).toBe("reviewing");
+    expect(mockSessionManager.runCommand).toHaveBeenCalledTimes(1);
+    expect(existsSync(workflow.iterations[1]!.reviewFindingsPath)).toBe(true);
+    expect(readFileSync(workflow.iterations[1]!.reviewFindingsPath, "utf-8")).toContain("Pending reviewer output");
+  });
 
   it("stamps workflow metadata onto recovered owner sessions", async () => {
     const projectPath = config.projects["my-app"]!.path;

@@ -89,6 +89,7 @@ function makeCreateConfig(overrides?: Partial<WorkspaceCreateConfig>): Workspace
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockExistsSync.mockReturnValue(false);
 });
 
 // ===========================================================================
@@ -300,6 +301,74 @@ describe("workspace.create()", () => {
     await expect(ws.create(makeCreateConfig())).rejects.toThrow(
       'fatal: remote branch missing',
     );
+  });
+
+  it("reuses an existing valid workspace path when worktree add hits an already-exists conflict", async () => {
+    const ws = create();
+
+    mockGitSuccess(""); // fetch
+    mockGitSuccess(""); // fetch base branch
+    mockGitError("fatal: '/mock-home/.worktrees/myproject/session-1' already exists"); // add -b fails
+    mockExistsSync.mockReturnValue(true);
+    mockGitSuccess("true"); // rev-parse inside worktree
+    mockGitSuccess("feat/TEST-1"); // branch --show-current
+
+    const info = await ws.create(makeCreateConfig());
+
+    expect(info).toEqual({
+      path: "/mock-home/.worktrees/myproject/session-1",
+      branch: "feat/TEST-1",
+      sessionId: "session-1",
+      projectId: "myproject",
+    });
+  });
+
+  it("cleans up an orphan create-path directory and restores architect artifacts", async () => {
+    const ws = create();
+
+    const existingPaths = new Set([
+      "/mock-home/.worktrees/myproject/session-1",
+      "/mock-home/.worktrees/myproject/session-1/.architect-delivery",
+      "/mock-home/.worktrees/myproject/session-1.__ao_architect_delivery_backup",
+    ]);
+    let architectDeliveryExistsChecks = 0;
+    mockExistsSync.mockImplementation((path: string) => {
+      if (path === "/mock-home/.worktrees/myproject/session-1/.architect-delivery") {
+        architectDeliveryExistsChecks += 1;
+        return architectDeliveryExistsChecks === 1;
+      }
+      return existingPaths.has(path);
+    });
+
+    mockGitError("fatal: not a git repository"); // reusable workspace probe
+    mockGitSuccess(""); // fetch
+    mockGitSuccess(""); // fetch base branch
+    mockGitError("fatal: not a git repository"); // validate existing path
+    mockGitSuccess(""); // worktree add -b succeeds after cleanup
+
+    const info = await ws.create(makeCreateConfig());
+
+    expect(mockCpSync).toHaveBeenCalledWith(
+      "/mock-home/.worktrees/myproject/session-1/.architect-delivery",
+      "/mock-home/.worktrees/myproject/session-1.__ao_architect_delivery_backup",
+      { recursive: true, force: true },
+    );
+    expect(mockRmSync).toHaveBeenCalledWith("/mock-home/.worktrees/myproject/session-1", {
+      recursive: true,
+      force: true,
+    });
+    expect(mockCpSync).toHaveBeenNthCalledWith(
+      2,
+      "/mock-home/.worktrees/myproject/session-1.__ao_architect_delivery_backup",
+      "/mock-home/.worktrees/myproject/session-1/.architect-delivery",
+      { recursive: true, force: true },
+    );
+    expect(info).toEqual({
+      path: "/mock-home/.worktrees/myproject/session-1",
+      branch: "feat/TEST-1",
+      sessionId: "session-1",
+      projectId: "myproject",
+    });
   });
 
   it("rejects invalid projectId", async () => {
@@ -803,6 +872,7 @@ describe("workspace.restore()", () => {
       return existingPaths.has(path);
     });
     mockGitError("fatal: not a git repository"); // probe broken directory
+    mockGitError("fatal: not a git repository"); // branch check in reusable-path probe
     mockGitSuccess(""); // worktree add succeeds after cleanup
 
     const info = await ws.restore!(makeCreateConfig(), "/mock-home/.worktrees/myproject/session-1");
@@ -865,5 +935,26 @@ describe("workspace.restore()", () => {
       sessionId: "session-1",
       projectId: "myproject",
     });
+  });
+
+  it("reuses an existing valid restore workspace when the directory is already on the target branch", async () => {
+    const ws = create();
+
+    mockGitSuccess(""); // worktree prune
+    mockGitSuccess(""); // fetch
+    mockGitSuccess(""); // fetch base branch
+    mockExistsSync.mockReturnValue(true);
+    mockGitSuccess("true"); // rev-parse inside worktree
+    mockGitSuccess("feat/TEST-1"); // branch --show-current
+
+    const info = await ws.restore!(makeCreateConfig(), "/mock-home/.worktrees/myproject/session-1");
+
+    expect(info).toEqual({
+      path: "/mock-home/.worktrees/myproject/session-1",
+      branch: "feat/TEST-1",
+      sessionId: "session-1",
+      projectId: "myproject",
+    });
+    expect(mockRmSync).not.toHaveBeenCalled();
   });
 });

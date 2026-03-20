@@ -18,6 +18,7 @@ import type {
   OrchestratorConfig,
   ProjectConfig,
   WorkflowState,
+  WorkflowStage,
   IterationState,
   Session,
     SessionManager,
@@ -58,6 +59,7 @@ export interface WorkflowManager {
   spawnNextBuilder(workflowId: string): Promise<Session | null>;
   spawnReviewer(workflow: WorkflowState, project: ProjectConfig): Promise<Session>;
   handleReviewComplete(workflowId: string, approved: boolean, feedback?: string): Promise<void>;
+  reopenWorkflow(workflowId: string, reason: string, preferredStage?: WorkflowStage): Promise<WorkflowState>;
   resumeWorkflow(workflowId: string): Promise<WorkflowState>;
   getWorkflow(projectId: string, workflowId: string): WorkflowState | null;
   listWorkflows(projectId: string): WorkflowState[];
@@ -576,12 +578,19 @@ Issue: ${issueId}
     };
 
     const spawnFreshOwnerSession = async (): Promise<Session | null> => {
+      const reusableWorkspacePath = workflow.worktreePath
+        ? await ownerWorkspaceUsable({ workspacePath: workflow.worktreePath } as Session)
+          ? workflow.worktreePath
+          : undefined
+        : undefined;
+
       const candidate = await sessionManager.spawn({
         projectId: workflow.projectId,
         issueId: workflow.issueId,
         skipIssueValidation: true,
         branch: workflow.branch,
         baseBranch: workflow.baseBranch,
+        ...(reusableWorkspacePath ? { workspacePath: reusableWorkspacePath } : {}),
         agent: "host-shell",
         workflowId: workflow.id,
         workflowStage: stage,
@@ -1333,6 +1342,77 @@ Issue: ${issueId}
     await dispatchArchitectForIteration(workflow, project, nextIteration);
   }
 
+  async function reopenWorkflow(
+    workflowId: string,
+    reason: string,
+    preferredStage: WorkflowStage = "architect",
+  ): Promise<WorkflowState> {
+    const { workflow, project } = loadWorkflowOrThrow(workflowId);
+    rebindWorkflowArtifactsToWorktree(workflow);
+    const iteration = workflow.iterations[workflow.currentIteration - 1];
+
+    if (!iteration) {
+      throw new Error(`No current iteration for workflow: ${workflowId}`);
+    }
+
+    ensureIterationArtifacts(iteration, workflow.issueId);
+    await ensureWorkflowRequirementsScaffold(project.path, workflow);
+
+    const normalizedPreferredStage = preferredStage === "reviewer" ? "architect" : preferredStage;
+    const feedbackPath = join(dirname(iteration.progressPath), "review-feedback.md");
+
+    if (workflow.status === "completed") {
+      iteration.status = "changes_requested";
+      iteration.completedAt = undefined;
+    }
+
+    iteration.status = normalizedPreferredStage === "builder" ? "building" : "planning";
+    workflow.status = normalizedPreferredStage === "builder" ? "building" : "planning";
+    workflow.ownerSessionId = "";
+    workflow.currentBuilderIteration = normalizedPreferredStage === "builder" ? 1 : 0;
+    workflow.lastReopenReason = reason;
+    workflow.lastReopenAt = new Date().toISOString();
+    setWorkflowIntent(
+      workflow,
+      normalizedPreferredStage,
+      iteration.number,
+      normalizedPreferredStage === "builder" ? 1 : 0,
+      "pending",
+    );
+
+    mkdirSync(dirname(feedbackPath), { recursive: true });
+    writeFileSync(feedbackPath, reason, "utf-8");
+    persistWorkflow(project.path, workflow);
+
+    const tracker = project.tracker ? registry.get<Tracker>("tracker", project.tracker.plugin) : null;
+    if (tracker?.updateIssue) {
+      await tracker.updateIssue(
+        workflow.issueId,
+        {
+          labels: ["agent:in-progress"],
+          removeLabels: ["agent:pending-merge", "agent:backlog"],
+          comment: `Workflow reopened automatically to address follow-up feedback.\n\n${reason}`,
+        },
+        project,
+      );
+    }
+
+    const scm = project.scm ? registry.get<SCM>("scm", project.scm.plugin) : null;
+    const prReference = workflow.artifacts.prs.at(-1);
+    if (prReference && scm?.resolvePR) {
+      const pr = await scm.resolvePR(prReference, project);
+      if (!pr.isDraft && scm.convertPRToDraft) {
+        try {
+          await scm.convertPRToDraft(pr);
+        } catch {
+          // Best effort only.
+        }
+      }
+    }
+
+    return resumeWorkflow(workflowId);
+  }
+
   async function resumeWorkflow(workflowId: string): Promise<WorkflowState> {
     const { workflow, project } = loadWorkflowOrThrow(workflowId);
 
@@ -1392,6 +1472,10 @@ Issue: ${issueId}
       }
       if (verdict === "changes_requested") {
         await handleReviewComplete(workflowId, false, readFileSync(iteration.reviewFindingsPath, "utf-8"));
+        return loadWorkflowOrThrow(workflowId).workflow;
+      }
+      if (workflow.dispatchStatus === "pending" || ownerSession.activity === "ready") {
+        await spawnReviewer(workflow, project);
         return loadWorkflowOrThrow(workflowId).workflow;
       }
       return workflow;
@@ -1508,6 +1592,7 @@ Issue: ${issueId}
     spawnNextBuilder,
     spawnReviewer,
     handleReviewComplete,
+    reopenWorkflow,
     resumeWorkflow,
     getWorkflow,
     listWorkflows,
