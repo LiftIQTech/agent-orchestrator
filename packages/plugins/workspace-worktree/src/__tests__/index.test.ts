@@ -31,7 +31,15 @@ vi.mock("node:os", () => ({
 // ---------------------------------------------------------------------------
 
 import * as childProcess from "node:child_process";
-import { existsSync, lstatSync, symlinkSync, rmSync, mkdirSync, readdirSync, cpSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  symlinkSync,
+  rmSync,
+  mkdirSync,
+  readdirSync,
+  cpSync,
+} from "node:fs";
 import { create, manifest } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +118,7 @@ describe("create() factory", () => {
     const ws = create();
 
     // Mock: fetch, worktree add
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -122,6 +131,7 @@ describe("create() factory", () => {
   it("uses custom worktreeDir from config", async () => {
     const ws = create({ worktreeDir: "/custom/worktrees" });
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -134,6 +144,7 @@ describe("create() factory", () => {
   it("expands tilde in custom worktreeDir", async () => {
     const ws = create({ worktreeDir: "~/custom-path" });
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -148,13 +159,21 @@ describe("workspace.create()", () => {
   it("calls git fetch and git worktree add with correct args", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
 
     await ws.create(makeCreateConfig());
 
-    // First call: git fetch origin --quiet
+    expect(mockExecFileAsync).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["worktree", "prune", "--verbose"],
+      { cwd: "/repo/path" },
+    );
+
+    // Second call: git fetch origin --quiet
     expect(mockExecFileAsync).toHaveBeenCalledWith("git", ["fetch", "origin", "--quiet"], {
       cwd: "/repo/path",
     });
@@ -177,6 +196,7 @@ describe("workspace.create()", () => {
   it("creates the project worktree directory", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -191,6 +211,7 @@ describe("workspace.create()", () => {
   it("continues when fetch fails (offline)", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitError("Could not resolve host"); // fetch fails
     mockGitSuccess(""); // worktree add succeeds
 
@@ -202,6 +223,7 @@ describe("workspace.create()", () => {
   it("handles branch already exists by adding worktree then checking out", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("already exists"); // worktree add -b fails
@@ -228,20 +250,25 @@ describe("workspace.create()", () => {
   it("reuses an existing worktree when checkout reports the branch is already attached elsewhere", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("already exists"); // worktree add -b fails
     mockGitSuccess(""); // worktree add without -b
-    mockGitError("fatal: 'feat/TEST-1' is already used by worktree at '/mock-home/.worktrees/myproject/session-9'"); // checkout says branch in use elsewhere
-    mockGitSuccess([
-      "worktree /repo/path",
-      "HEAD abc1234",
-      "branch refs/heads/main",
-      "",
-      "worktree /mock-home/.worktrees/myproject/session-9",
-      "HEAD def5678",
-      "branch refs/heads/feat/TEST-1",
-    ].join("\n"));
+    mockGitError(
+      "fatal: 'feat/TEST-1' is already used by worktree at '/mock-home/.worktrees/myproject/session-9'",
+    ); // checkout says branch in use elsewhere
+    mockGitSuccess(
+      [
+        "worktree /repo/path",
+        "HEAD abc1234",
+        "branch refs/heads/main",
+        "",
+        "worktree /mock-home/.worktrees/myproject/session-9",
+        "HEAD def5678",
+        "branch refs/heads/feat/TEST-1",
+      ].join("\n"),
+    );
 
     const info = await ws.create(makeCreateConfig());
 
@@ -256,6 +283,7 @@ describe("workspace.create()", () => {
   it("cleans up worktree on checkout failure", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("already exists"); // worktree add -b fails
@@ -278,6 +306,7 @@ describe("workspace.create()", () => {
   it("still throws on checkout failure even if cleanup fails", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("already exists"); // worktree add -b fails
@@ -293,19 +322,19 @@ describe("workspace.create()", () => {
   it("throws for non-already-exists worktree add errors", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("fatal: invalid reference"); // worktree add fails with other error
     mockGitError("fatal: remote branch missing"); // chosen base branch fallback fails
 
-    await expect(ws.create(makeCreateConfig())).rejects.toThrow(
-      'fatal: remote branch missing',
-    );
+    await expect(ws.create(makeCreateConfig())).rejects.toThrow("fatal: remote branch missing");
   });
 
   it("reuses an existing valid workspace path when worktree add hits an already-exists conflict", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitError("fatal: '/mock-home/.worktrees/myproject/session-1' already exists"); // add -b fails
@@ -340,6 +369,7 @@ describe("workspace.create()", () => {
       return existingPaths.has(path);
     });
 
+    mockGitSuccess(""); // worktree prune
     mockGitError("fatal: not a git repository"); // reusable workspace probe
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
@@ -406,6 +436,7 @@ describe("workspace.create()", () => {
   it("returns correct WorkspaceInfo", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -423,6 +454,7 @@ describe("workspace.create()", () => {
   it("expands tilde in project path", async () => {
     const ws = create();
 
+    mockGitSuccess(""); // worktree prune
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockGitSuccess(""); // worktree add
@@ -916,21 +948,49 @@ describe("workspace.restore()", () => {
     mockGitSuccess(""); // fetch
     mockGitSuccess(""); // fetch base branch
     mockExistsSync.mockReturnValue(false);
-    mockGitError("fatal: 'feat/TEST-1' is already used by worktree at '/mock-home/.worktrees/myproject/session-9'"); // add existing branch
-    mockGitSuccess([
-      "worktree /repo/path",
-      "HEAD abc1234",
-      "branch refs/heads/main",
-      "",
-      "worktree /mock-home/.worktrees/myproject/session-9",
-      "HEAD def5678",
-      "branch refs/heads/feat/TEST-1",
-    ].join("\n"));
+    mockGitError(
+      "fatal: 'feat/TEST-1' is already used by worktree at '/mock-home/.worktrees/myproject/session-9'",
+    ); // add existing branch
+    mockGitSuccess(
+      [
+        "worktree /repo/path",
+        "HEAD abc1234",
+        "branch refs/heads/main",
+        "",
+        "worktree /mock-home/.worktrees/myproject/session-9",
+        "HEAD def5678",
+        "branch refs/heads/feat/TEST-1",
+      ].join("\n"),
+    );
 
     const info = await ws.restore!(makeCreateConfig(), "/mock-home/.worktrees/myproject/session-1");
 
     expect(info).toEqual({
       path: "/mock-home/.worktrees/myproject/session-9",
+      branch: "feat/TEST-1",
+      sessionId: "session-1",
+      projectId: "myproject",
+    });
+  });
+
+  it("reuses an existing valid restore workspace when worktree add reports the path already exists", async () => {
+    const ws = create();
+
+    mockGitSuccess(""); // worktree prune
+    mockGitSuccess(""); // fetch
+    mockGitSuccess(""); // fetch base branch
+    mockExistsSync.mockReturnValue(true);
+    mockGitSuccess("true"); // initial rev-parse reusable probe
+    mockGitSuccess("different-branch"); // initial branch mismatch
+    mockGitSuccess("true"); // restore preflight rev-parse
+    mockGitError("fatal: '/mock-home/.worktrees/myproject/session-1' already exists"); // worktree add
+    mockGitSuccess("true"); // reusable probe after add failure
+    mockGitSuccess("feat/TEST-1"); // branch --show-current
+
+    const info = await ws.restore!(makeCreateConfig(), "/mock-home/.worktrees/myproject/session-1");
+
+    expect(info).toEqual({
+      path: "/mock-home/.worktrees/myproject/session-1",
       branch: "feat/TEST-1",
       sessionId: "session-1",
       projectId: "myproject",

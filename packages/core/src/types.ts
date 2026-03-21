@@ -190,13 +190,13 @@ export interface SessionSpawnConfig {
   siblings?: string[];
   /** Base branch to create feature branch from (default: project's defaultBranch) */
   baseBranch?: string;
-  
+
   /** Workflow context */
   workflowId?: string;
   workflowStage?: WorkflowStage;
   workflowIteration?: number;
   builderIteration?: number;
-  
+
   /** Reuse existing workspace path (for workflow agents sharing same worktree) */
   workspacePath?: string;
 }
@@ -497,6 +497,8 @@ export interface Issue {
   labels: string[];
   assignee?: string;
   priority?: number;
+  linkedBranch?: string;
+  linkedBranches?: string[];
 }
 
 export interface IssueFilters {
@@ -1105,7 +1107,7 @@ export interface SessionMetadata {
   terminalWsPort?: number;
   directTerminalWsPort?: number;
   opencodeSessionId?: string;
-  
+
   /** Workflow fields */
   workflowId?: string;
   workflowStage?: string;
@@ -1270,18 +1272,18 @@ export class SessionNotFoundError extends Error {
 
 export type WorkflowStage = "architect" | "builder" | "reviewer";
 
-export type WorkflowStatus = 
+export type WorkflowStatus =
   | "pending"
-  | "planning"    // Architect working
-  | "building"    // Builders working (sequential)
-  | "reviewing"   // Reviewer working
-  | "completed" 
+  | "planning" // Architect working
+  | "building" // Builders working (sequential)
+  | "reviewing" // Reviewer working
+  | "completed"
   | "failed";
 
 export type TaskStatus = "pending" | "completed";
 
 export interface WorkflowTask {
-  id: string;              // TASK-01, TASK-02
+  id: string; // TASK-01, TASK-02
   description: string;
   status: TaskStatus;
 }
@@ -1297,13 +1299,13 @@ export interface IterationState {
   orchestratorAnalysisPath: string;
   reviewFindingsPath: string;
   architectSession?: string;
-  builderSessions: string[];  // Sequential: [build-1, build-2, ...]
+  builderSessions: string[]; // Sequential: [build-1, build-2, ...]
   reviewerSession?: string;
 }
 
 export interface WorkflowState {
-  id: string;                    // wf-INT-123
-  issueId: string;               // INT-123
+  id: string; // wf-INT-123
+  issueId: string; // INT-123
   projectId: string;
   status: WorkflowStatus;
   desiredStage?: WorkflowStage;
@@ -1314,10 +1316,11 @@ export interface WorkflowState {
   lastStageActivityAt?: string;
   currentIteration: number;
   maxIterations: number;
-  currentBuilderIteration: number;  // 0, 1, 2, 3... within current iteration
-  maxBuilderIterations: number;     // e.g., 5
+  currentBuilderIteration: number; // 0, 1, 2, 3... within current iteration
+  maxBuilderIterations: number; // e.g., 5
   branch: string;
   baseBranch: string;
+  baseBranchSource?: "explicit" | "issue-linked" | "project-default";
   worktreePath: string;
   ownerSessionId: string;
   createdAt: string;
@@ -1330,6 +1333,7 @@ export interface WorkflowState {
   lastReopenReason?: string;
   lastReopenAt?: string;
   lastSeenFailingChecks?: string[];
+  followUpRetryAt?: string;
 }
 
 export interface WorkflowConfig {
@@ -1340,11 +1344,11 @@ export interface WorkflowConfig {
     reviewer?: string;
   };
   builders?: {
-    maxIterations: number;       // Default: 5
-    tasksPerBuilder: number;    // Default: 3
+    maxIterations: number; // Default: 5
+    tasksPerBuilder: number; // Default: 3
   };
   iterations?: {
-    maxIterations: number;       // Default: 3
+    maxIterations: number; // Default: 3
     autoMergeOnApproval: boolean;
   };
 }

@@ -86,6 +86,41 @@ async function ghIssueViewJson(identifier: string, project: ProjectConfig): Prom
   }
 }
 
+async function getLinkedBranches(identifier: string, project: ProjectConfig): Promise<string[]> {
+  const [owner, repo] = project.repo.split("/");
+  const number = Number.parseInt(identifier.replace(/^#/, ""), 10);
+  if (!owner || !repo || !Number.isFinite(number)) return [];
+
+  const raw = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `owner=${owner}`,
+    "-f",
+    `repo=${repo}`,
+    "-F",
+    `number=${number}`,
+    "-f",
+    "query=query($owner:String!,$repo:String!,$number:Int!){ repository(owner:$owner,name:$repo){ issue(number:$number){ linkedBranches(first:10){ nodes{ ref{ name } } } } } }",
+  ]);
+
+  const data: {
+    data?: {
+      repository?: {
+        issue?: {
+          linkedBranches?: {
+            nodes?: Array<{ ref?: { name?: string | null } | null } | null>;
+          };
+        };
+      };
+    };
+  } = JSON.parse(raw);
+
+  return (data.data?.repository?.issue?.linkedBranches?.nodes ?? [])
+    .map((node) => node?.ref?.name ?? "")
+    .filter((name): name is string => name.length > 0);
+}
+
 async function ghIssueListJson(args: string[]): Promise<string> {
   const withStateReason = [
     ...args,
@@ -105,10 +140,7 @@ async function ghIssueComments(
   project: ProjectConfig,
 ): Promise<Array<{ user?: { login?: string }; body?: string; created_at?: string }>> {
   const issueNum = identifier.replace(/^#/, "");
-  const raw = await gh([
-    "api",
-    `repos/${project.repo}/issues/${issueNum}/comments?per_page=30`,
-  ]);
+  const raw = await gh(["api", `repos/${project.repo}/issues/${issueNum}/comments?per_page=30`]);
   return JSON.parse(raw);
 }
 
@@ -163,11 +195,18 @@ function createGitHubTracker(): Tracker {
       } = JSON.parse(raw);
 
       let description = data.body ?? "";
+      let linkedBranches: string[] = [];
       try {
         const comments = await ghIssueComments(identifier, project);
         description = appendLatestCommentsToDescription(description, comments);
       } catch {
         // Non-fatal: if comments fetch fails, continue with issue body only.
+      }
+
+      try {
+        linkedBranches = await getLinkedBranches(identifier, project);
+      } catch {
+        // Non-fatal: continue without linked branch metadata.
       }
 
       return {
@@ -178,6 +217,8 @@ function createGitHubTracker(): Tracker {
         state: mapState(data.state, data.stateReason),
         labels: data.labels.map((l) => l.name),
         assignee: data.assignees[0]?.login,
+        linkedBranch: linkedBranches[0],
+        linkedBranches,
       };
     },
 

@@ -109,6 +109,25 @@ beforeEach(() => {
     get: vi.fn().mockImplementation((slot: string) => {
       if (slot === "runtime") return mockRuntime;
       if (slot === "agent") return mockAgent;
+      if (slot === "tracker") {
+        return {
+          name: "mock-tracker",
+          getIssue: vi.fn().mockResolvedValue({
+            id: "645",
+            title: "Issue 645",
+            description: "",
+            url: "https://github.com/org/my-app/issues/645",
+            state: "open",
+            labels: [],
+            linkedBranch: undefined,
+            linkedBranches: [],
+          }),
+          isCompleted: vi.fn().mockResolvedValue(false),
+          issueUrl: vi.fn().mockReturnValue("https://github.com/org/my-app/issues/645"),
+          branchName: vi.fn().mockReturnValue("feat/issue-645"),
+          generatePrompt: vi.fn().mockResolvedValue("prompt"),
+        };
+      }
       return null;
     }),
     list: vi.fn().mockReturnValue([]),
@@ -145,6 +164,7 @@ beforeEach(() => {
         path: join(tmpDir, "my-app"),
         defaultBranch: "main",
         sessionPrefix: "app",
+        tracker: { plugin: "mock-tracker" },
         scm: { plugin: "github" },
         workflow: { enabled: true },
       },
@@ -218,20 +238,73 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "reviewing",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-1"],
         architectSession: "app-1",
         reviewerSession: "app-1",
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-641",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
     writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
-    writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n\nIssue: 641\n\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.progressPath,
+      "# Progress - Iteration 1\n\nIssue: 641\n\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.orchestratorAnalysisPath, "# Analysis\n", "utf-8");
     writeFileSync(
       workflow.iterations[0]!.reviewFindingsPath,
@@ -289,7 +362,12 @@ describe("workflow iteration rollover", () => {
 
     expect(mockSessionManager.runCommand).toHaveBeenCalledTimes(1);
 
-    const saved = JSON.parse(readFileSync(join(getProjectBaseDir(config.configPath, projectPath), "workflows", "wf-641.json"), "utf-8"));
+    const saved = JSON.parse(
+      readFileSync(
+        join(getProjectBaseDir(config.configPath, projectPath), "workflows", "wf-641.json"),
+        "utf-8",
+      ),
+    );
     expect(saved.status).toBe("planning");
     expect(saved.currentIteration).toBe(2);
     expect(saved.iterations[1].status).toBe("planning");
@@ -330,11 +408,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-1"],
         architectSession: "app-1",
         reviewerSession: "app-1",
@@ -343,20 +460,91 @@ describe("workflow iteration rollover", () => {
         number: 2,
         status: "planning",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-641",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-001"), { recursive: true });
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-641", "iterations", "iteration-002"), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.reviewFindingsPath, "## VERDICT: CHANGES REQUESTED\n", "utf-8");
-    writeFileSync(workflow.iterations[1]!.planPath, "# PLAN - Iteration 2\n\nIssue: 641\n\n(Architect will add tasks)\n", "utf-8");
-    writeFileSync(workflow.iterations[1]!.progressPath, "# Progress - Iteration 2\n\nIssue: 641\n\n", "utf-8");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-641",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-641",
+        "iterations",
+        "iteration-002",
+      ),
+      { recursive: true },
+    );
+    writeFileSync(
+      workflow.iterations[0]!.reviewFindingsPath,
+      "## VERDICT: CHANGES REQUESTED\n",
+      "utf-8",
+    );
+    writeFileSync(
+      workflow.iterations[1]!.planPath,
+      "# PLAN - Iteration 2\n\nIssue: 641\n\n(Architect will add tasks)\n",
+      "utf-8",
+    );
+    writeFileSync(
+      workflow.iterations[1]!.progressPath,
+      "# Progress - Iteration 2\n\nIssue: 641\n\n",
+      "utf-8",
+    );
     saveWorkflowState(config.configPath, projectPath, workflow);
 
     writeMetadata(sessionsDir, "app-1", {
@@ -441,11 +629,50 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "planning",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-907", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-907", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-907", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-907", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-907", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-907",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-907",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-907",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-907",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-907",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
     ];
@@ -504,16 +731,59 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-909", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-909", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-909", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-909", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-909", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-909",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-909",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-909",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-909",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-909",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
     ];
     mkdirSync(dirname(workflow.iterations[0]!.planPath), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -622,12 +892,32 @@ describe("workflow iteration rollover", () => {
       getMergeability: vi.fn(),
     };
 
+    const mockTracker = {
+      name: "mock-tracker",
+      getIssue: vi.fn().mockResolvedValue({
+        id: "645",
+        title: "Issue 645",
+        description: "",
+        url: "https://github.com/org/my-app/issues/645",
+        state: "open",
+        labels: ["agent:backlog"],
+        linkedBranch: undefined,
+        linkedBranches: [],
+      }),
+      updateIssue: vi.fn().mockResolvedValue(undefined),
+      isCompleted: vi.fn().mockResolvedValue(false),
+      issueUrl: vi.fn().mockReturnValue("https://github.com/org/my-app/issues/645"),
+      branchName: vi.fn().mockReturnValue("feat/issue-645"),
+      generatePrompt: vi.fn().mockResolvedValue("prompt"),
+    };
+
     const registryWithSCM: PluginRegistry = {
       ...mockRegistry,
       get: vi.fn().mockImplementation((slot: string) => {
         if (slot === "runtime") return mockRuntime;
         if (slot === "agent") return mockAgent;
         if (slot === "scm") return mockSCM;
+        if (slot === "tracker") return mockTracker;
         return null;
       }),
     };
@@ -636,6 +926,11 @@ describe("workflow iteration rollover", () => {
     vi.mocked(mockSessionManager.get).mockResolvedValue(hostShellSession);
     vi.mocked(mockSessionManager.runCommand).mockResolvedValue(undefined);
     mockExecFile
+      .mockImplementationOnce((file, args, options, callback) => {
+        const cb = typeof options === "function" ? options : callback;
+        cb?.(null, "", "");
+        return {} as ReturnType<typeof execFile>;
+      })
       .mockImplementationOnce((file, args, options, callback) => {
         const cb = typeof options === "function" ? options : callback;
         cb?.(null, "", "");
@@ -669,27 +964,176 @@ describe("workflow iteration rollover", () => {
 
     expect(mockSCM.createPR).toHaveBeenCalledTimes(2);
     expect(mockExecFile).toHaveBeenNthCalledWith(
-      1,
+      2,
       "git",
       ["add", "--", requirementsPath],
       expect.objectContaining({ cwd: worktreePath }),
       expect.any(Function),
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
+      3,
       "git",
       ["commit", "-m", "chore(workflow): bootstrap issue 645 branch visibility"],
       expect.objectContaining({ cwd: worktreePath }),
       expect.any(Function),
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
-      3,
+      4,
       "git",
       ["rev-parse", "HEAD"],
       expect.objectContaining({ cwd: worktreePath }),
       expect.any(Function),
     );
     expect(workflow.artifacts.prs).toEqual(["https://github.com/org/my-app/pull/645"]);
+    expect(workflow.baseBranchSource).toBe("project-default");
+    expect(mockTracker.updateIssue).toHaveBeenCalledWith(
+      "645",
+      {
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:backlog", "agent:pending-merge"],
+        comment: "Claimed by agent orchestrator - architect workflow started.",
+      },
+      expect.objectContaining({ tracker: { plugin: "mock-tracker" } }),
+    );
+  });
+
+  it("prefers linked issue branch over project default when starting workflow", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    config.projects["my-app"]!.tracker = { plugin: "mock-tracker" };
+
+    const worktreePath = join(tmpDir, "linked-branch-worktree");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const hostShellSession = makeSession({
+      id: "app-1",
+      branch: "feat/777-from-feature-579-kpis-pg-to-ddb",
+      workspacePath: worktreePath,
+      metadata: { agent: "host-shell" },
+    });
+
+    vi.mocked(mockSessionManager.spawn).mockResolvedValue(hostShellSession);
+    vi.mocked(mockSessionManager.get).mockResolvedValue(hostShellSession);
+
+    const mockSCM = {
+      name: "mock-scm",
+      detectPR: vi.fn().mockResolvedValue(null),
+      createPR: vi.fn().mockResolvedValue(
+        makePR({
+          number: 777,
+          url: "https://github.com/org/my-app/pull/777",
+          branch: "feat/777-from-feature-579-kpis-pg-to-ddb",
+          baseBranch: "feature/579-kpis-pg-to-ddb",
+          isDraft: true,
+        }),
+      ),
+      resolvePR: vi.fn(),
+      convertPRToDraft: vi.fn(),
+      markPRReadyForReview: vi.fn(),
+      updatePRBody: vi.fn(),
+      getPRState: vi.fn(),
+      getReviewDecision: vi.fn(),
+      getPendingComments: vi.fn(),
+      getAutomatedComments: vi.fn(),
+      getMergeability: vi.fn(),
+    };
+
+    const mockTracker = {
+      name: "mock-tracker",
+      getIssue: vi.fn().mockResolvedValue({
+        id: "777",
+        title: "Issue 777",
+        description: "",
+        url: "https://github.com/org/my-app/issues/777",
+        state: "open",
+        labels: [],
+        linkedBranch: "feature/579-kpis-pg-to-ddb",
+        linkedBranches: ["feature/579-kpis-pg-to-ddb"],
+      }),
+      isCompleted: vi.fn().mockResolvedValue(false),
+      issueUrl: vi.fn().mockReturnValue("https://github.com/org/my-app/issues/777"),
+      branchName: vi.fn().mockReturnValue("feat/issue-777"),
+      generatePrompt: vi.fn().mockResolvedValue("prompt"),
+      updateIssue: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithLinkedBranch: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "tracker") return mockTracker;
+        if (slot === "scm") return mockSCM;
+        return null;
+      }),
+    };
+
+    const wm = createWorkflowManager({
+      config,
+      registry: registryWithLinkedBranch,
+      sessionManager: mockSessionManager,
+    });
+
+    const workflow = await wm.startWorkflow("my-app", "777");
+
+    expect(workflow.baseBranch).toBe("feature/579-kpis-pg-to-ddb");
+    expect(workflow.baseBranchSource).toBe("issue-linked");
+    expect(workflow.branch).toBe("feat/777-from-feature-579-kpis-pg-to-ddb");
+    expect(mockSessionManager.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseBranch: "feature/579-kpis-pg-to-ddb",
+        branch: "feat/777-from-feature-579-kpis-pg-to-ddb",
+      }),
+    );
+    expect(mockTracker.updateIssue).toHaveBeenCalledWith(
+      "777",
+      {
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:backlog", "agent:pending-merge"],
+        comment: "Claimed by agent orchestrator - architect workflow started.",
+      },
+      expect.objectContaining({ tracker: { plugin: "mock-tracker" } }),
+    );
+  });
+
+  it("fails workflow start when multiple linked branches exist", async () => {
+    config.projects["my-app"]!.tracker = { plugin: "mock-tracker" };
+
+    const mockTracker = {
+      name: "mock-tracker",
+      getIssue: vi.fn().mockResolvedValue({
+        id: "778",
+        title: "Issue 778",
+        description: "",
+        url: "https://github.com/org/my-app/issues/778",
+        state: "open",
+        labels: [],
+        linkedBranch: "feature/a",
+        linkedBranches: ["feature/a", "feature/b"],
+      }),
+      isCompleted: vi.fn().mockResolvedValue(false),
+      issueUrl: vi.fn().mockReturnValue("https://github.com/org/my-app/issues/778"),
+      branchName: vi.fn().mockReturnValue("feat/issue-778"),
+      generatePrompt: vi.fn().mockResolvedValue("prompt"),
+    };
+
+    const registryWithMultipleBranches: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "tracker") return mockTracker;
+        return null;
+      }),
+    };
+
+    const wm = createWorkflowManager({
+      config,
+      registry: registryWithMultipleBranches,
+      sessionManager: mockSessionManager,
+    });
+
+    await expect(wm.startWorkflow("my-app", "778")).rejects.toThrow("multiple linked branches");
   });
 
   it("marks completed non-automerge workflows pending-merge and readies the PR", async () => {
@@ -713,11 +1157,7 @@ describe("workflow iteration rollover", () => {
       "iteration-001",
     );
     mkdirSync(iterationDir, { recursive: true });
-    writeFileSync(
-      join(iterationDir, "PLAN.md"),
-      "- [x] TASK-01: done\n",
-      "utf-8",
-    );
+    writeFileSync(join(iterationDir, "PLAN.md"), "- [x] TASK-01: done\n", "utf-8");
     writeFileSync(join(iterationDir, "PROGRESS.md"), "done\n", "utf-8");
     writeFileSync(join(iterationDir, "CODE_REVIEW_FINDINGS.md"), "## VERDICT: APPROVED\n", "utf-8");
 
@@ -845,11 +1285,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
       {
@@ -857,11 +1336,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-950", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-950",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
       {
@@ -884,7 +1402,12 @@ describe("workflow iteration rollover", () => {
       name: "mock-tracker",
       updateIssue: vi.fn().mockResolvedValue(undefined),
     };
-    const resolvedPr = makePR({ number: 950, url: "https://github.com/org/repo/pull/950", branch: "feat/950", isDraft: false });
+    const resolvedPr = makePR({
+      number: 950,
+      url: "https://github.com/org/repo/pull/950",
+      branch: "feat/950",
+      isDraft: false,
+    });
     const mockSCM: SCM = {
       name: "mock-scm",
       detectPR: vi.fn(),
@@ -893,15 +1416,23 @@ describe("workflow iteration rollover", () => {
       mergePR: vi.fn(),
       closePR: vi.fn(),
       getPRState: vi.fn().mockResolvedValue("open"),
-      getCIChecks: vi.fn().mockResolvedValue([
-        { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
-      ]),
+      getCIChecks: vi
+        .fn()
+        .mockResolvedValue([
+          { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
+        ]),
       getCISummary: vi.fn().mockResolvedValue("failing"),
       getReviews: vi.fn().mockResolvedValue([]),
       getReviewDecision: vi.fn().mockResolvedValue("none"),
       getPendingComments: vi.fn().mockResolvedValue([]),
       getAutomatedComments: vi.fn().mockResolvedValue([]),
-      getMergeability: vi.fn().mockResolvedValue({ mergeable: false, ciPassing: false, approved: false, noConflicts: true, blockers: ["CI is failing"] }),
+      getMergeability: vi.fn().mockResolvedValue({
+        mergeable: false,
+        ciPassing: false,
+        approved: false,
+        noConflicts: true,
+        blockers: ["CI is failing"],
+      }),
     };
 
     const registryWithTrackerAndScm: PluginRegistry = {
@@ -911,7 +1442,8 @@ describe("workflow iteration rollover", () => {
         if (slot === "agent") return mockAgent;
         if (slot === "tracker") return mockTracker;
         if (slot === "scm") return mockSCM;
-        if (slot === "workspace") return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
+        if (slot === "workspace")
+          return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
         return null;
       }),
     };
@@ -941,7 +1473,9 @@ describe("workflow iteration rollover", () => {
         workspacePath: worktreePath,
       }),
     ]);
-    vi.mocked(mockSessionManager.get).mockResolvedValueOnce(replacement).mockResolvedValue(replacement);
+    vi.mocked(mockSessionManager.get)
+      .mockResolvedValueOnce(replacement)
+      .mockResolvedValue(replacement);
     vi.mocked(mockSessionManager.spawn).mockResolvedValue(replacement);
 
     const lm = createLifecycleManager({
@@ -955,8 +1489,8 @@ describe("workflow iteration rollover", () => {
     lm.stop();
 
     const reopened = loadWorkflowState(config.configPath, projectPath, workflow.id);
-    expect(reopened?.status).toBe("building");
-    expect(reopened?.desiredStage).toBe("builder");
+    expect(reopened?.status).toBe("planning");
+    expect(reopened?.desiredStage).toBe("architect");
     expect(existsSync(join(iterationDir, "review-feedback.md"))).toBe(true);
     expect(mockTracker.updateIssue).toHaveBeenCalledWith(
       "950",
@@ -983,7 +1517,14 @@ describe("workflow iteration rollover", () => {
     };
 
     const worktreePath = join(tmpDir, "same-ci-active-workflow");
-    const iterationDir = join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-003");
+    const iterationDir = join(
+      worktreePath,
+      ".architect-delivery",
+      "projects",
+      "issue-951",
+      "iterations",
+      "iteration-003",
+    );
     mkdirSync(iterationDir, { recursive: true });
     writeFileSync(join(iterationDir, "PLAN.md"), "- [x] TASK-01: done\n", "utf-8");
     writeFileSync(join(iterationDir, "PROGRESS.md"), "done\n", "utf-8");
@@ -1012,11 +1553,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
       {
@@ -1024,11 +1604,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-951", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-951",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
       {
@@ -1045,7 +1664,12 @@ describe("workflow iteration rollover", () => {
     ];
     saveWorkflowState(config.configPath, projectPath, workflow);
 
-    const resolvedPr = makePR({ number: 951, url: "https://github.com/org/repo/pull/951", branch: "feat/951", isDraft: true });
+    const resolvedPr = makePR({
+      number: 951,
+      url: "https://github.com/org/repo/pull/951",
+      branch: "feat/951",
+      isDraft: true,
+    });
     const mockSCM: SCM = {
       name: "mock-scm",
       detectPR: vi.fn(),
@@ -1054,15 +1678,23 @@ describe("workflow iteration rollover", () => {
       mergePR: vi.fn(),
       closePR: vi.fn(),
       getPRState: vi.fn().mockResolvedValue("open"),
-      getCIChecks: vi.fn().mockResolvedValue([
-        { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
-      ]),
+      getCIChecks: vi
+        .fn()
+        .mockResolvedValue([
+          { name: "Unit Tests", status: "failed", url: "https://example.com/checks/1" },
+        ]),
       getCISummary: vi.fn().mockResolvedValue("failing"),
       getReviews: vi.fn().mockResolvedValue([]),
       getReviewDecision: vi.fn().mockResolvedValue("none"),
       getPendingComments: vi.fn().mockResolvedValue([]),
       getAutomatedComments: vi.fn().mockResolvedValue([]),
-      getMergeability: vi.fn().mockResolvedValue({ mergeable: false, ciPassing: false, approved: false, noConflicts: true, blockers: ["CI is failing"] }),
+      getMergeability: vi.fn().mockResolvedValue({
+        mergeable: false,
+        ciPassing: false,
+        approved: false,
+        noConflicts: true,
+        blockers: ["CI is failing"],
+      }),
     };
 
     const registryWithScm: PluginRegistry = {
@@ -1071,8 +1703,10 @@ describe("workflow iteration rollover", () => {
         if (slot === "runtime") return mockRuntime;
         if (slot === "agent") return mockAgent;
         if (slot === "scm") return mockSCM;
-        if (slot === "tracker") return { name: "mock-tracker", updateIssue: vi.fn().mockResolvedValue(undefined) };
-        if (slot === "workspace") return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
+        if (slot === "tracker")
+          return { name: "mock-tracker", updateIssue: vi.fn().mockResolvedValue(undefined) };
+        if (slot === "workspace")
+          return { name: "worktree", exists: vi.fn().mockResolvedValue(true) };
         return null;
       }),
     };
@@ -1148,18 +1782,71 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-902",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-902",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-902",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-902",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-902",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1", "app-1"],
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-902", "iterations", "iteration-001"), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-902",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -1178,6 +1865,8 @@ describe("workflow iteration rollover", () => {
     });
 
     vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+    vi.mocked(mockSessionManager.restore).mockResolvedValue(session);
+    vi.mocked(mockSessionManager.spawn).mockResolvedValue(session);
     vi.mocked(mockSessionManager.spawn).mockResolvedValue(session);
 
     const wm = createWorkflowManager({
@@ -1198,7 +1887,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "idempotent-builder-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-910",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1222,17 +1921,60 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-910", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-910",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-910",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-910",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-910",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-910",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1", "app-2"],
       },
     ];
 
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -1251,6 +1993,8 @@ describe("workflow iteration rollover", () => {
     });
 
     vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+    vi.mocked(mockSessionManager.restore).mockResolvedValue(session);
+    vi.mocked(mockSessionManager.spawn).mockResolvedValue(session);
 
     const wm = createWorkflowManager({
       config,
@@ -1271,7 +2015,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "completed-builder-resume-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-912",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1295,11 +2049,50 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-912", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-912",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-912",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-912",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-912",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-912",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-0",
         builderSessions: ["app-1"],
       },
@@ -1371,7 +2164,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "maxed-builder-resume-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-913",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1395,11 +2198,50 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-913", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-913",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-913",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-913",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-913",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-913",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-0",
         builderSessions: ["app-1", "app-2", "app-3", "app-4", "app-5"],
       },
@@ -1466,7 +2308,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "pending-commit-builder-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-914",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1490,21 +2342,56 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-914", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-914",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-914",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-914",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-914",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-914",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-0",
         builderSessions: ["app-1"],
       },
     ];
 
-    writeFileSync(
-      workflow.iterations[0]!.planPath,
-      "# PLAN\n\n- [x] TASK-01: Done\n",
-      "utf-8",
-    );
+    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
     writeFileSync(
       workflow.iterations[0]!.progressPath,
       "# Progress - Iteration 1\n\n## Builder 1 (2026-03-16T15:55:05Z)\n\n### Git Commit\n- Hash: pending\n",
@@ -1546,8 +2433,28 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "stale-reviewer-intent-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001"), { recursive: true });
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-915",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-915",
+        "iterations",
+        "iteration-002",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1572,11 +2479,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-2"],
         reviewerSession: "app-3",
@@ -1585,16 +2531,59 @@ describe("workflow iteration rollover", () => {
         number: 2,
         status: "planning",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-915", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-915",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: [],
       },
     ];
 
-    writeFileSync(workflow.iterations[0]!.reviewFindingsPath, "## VERDICT: CHANGES REQUESTED\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.reviewFindingsPath,
+      "## VERDICT: CHANGES REQUESTED\n",
+      "utf-8",
+    );
     writeFileSync(
       workflow.iterations[1]!.planPath,
       "# PLAN - Iteration 2\n\nIssue: 915\n\n(Architect will add tasks)\n",
@@ -1642,7 +2631,17 @@ describe("workflow iteration rollover", () => {
     mkdirSync(projectPath, { recursive: true });
     const oldWorktreePath = join(tmpDir, "old-worktree");
     const newWorktreePath = join(tmpDir, "new-worktree");
-    mkdirSync(join(newWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        newWorktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-903",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1666,11 +2665,50 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(oldWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001"),
-        planPath: join(oldWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(oldWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(oldWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(oldWorktreePath, ".architect-delivery", "projects", "issue-903", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          oldWorktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-903",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          oldWorktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-903",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          oldWorktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-903",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          oldWorktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-903",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          oldWorktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-903",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1"],
       },
@@ -1713,7 +2751,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "rebind-before-resume");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-904", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-904",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1746,8 +2794,32 @@ describe("workflow iteration rollover", () => {
         builderSessions: ["app-1"],
       },
     ];
-    writeFileSync(join(worktreePath, ".architect-delivery", "projects", "issue-904", "iterations", "iteration-001", "PLAN.md"), "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
-    writeFileSync(join(worktreePath, ".architect-delivery", "projects", "issue-904", "iterations", "iteration-001", "PROGRESS.md"), "# Progress - Iteration 1\n", "utf-8");
+    writeFileSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-904",
+        "iterations",
+        "iteration-001",
+        "PLAN.md",
+      ),
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
+    writeFileSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-904",
+        "iterations",
+        "iteration-001",
+        "PROGRESS.md",
+      ),
+      "# Progress - Iteration 1\n",
+      "utf-8",
+    );
     saveWorkflowState(config.configPath, projectPath, workflow);
 
     const session = makeSession({
@@ -1782,7 +2854,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "pending-review-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-906",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -1805,18 +2887,61 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "reviewing",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-906", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-906",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-906",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-906",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-906",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-906",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         reviewerSession: "app-1",
         builderSessions: ["app-1"],
       },
     ];
     writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
-    writeFileSync(workflow.iterations[0]!.reviewFindingsPath, "# CODE REVIEW FINDINGS - Iteration 1\n\n(Pending reviewer output)\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.reviewFindingsPath,
+      "# CODE REVIEW FINDINGS - Iteration 1\n\n(Pending reviewer output)\n",
+      "utf-8",
+    );
     saveWorkflowState(config.configPath, projectPath, workflow);
 
     const session = makeSession({
@@ -1890,18 +3015,71 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-901",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-901",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-901",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-901",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-901",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1", "app-1"],
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-901", "iterations", "iteration-001"), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-901",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -1964,7 +3142,14 @@ describe("workflow iteration rollover", () => {
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "resume-existing-worktree");
     mkdirSync(
-      join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002"),
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-916",
+        "iterations",
+        "iteration-002",
+      ),
       { recursive: true },
     );
 
@@ -1988,11 +3173,50 @@ describe("workflow iteration rollover", () => {
         status: "approved",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-1"],
         architectSession: "app-1",
         reviewerSession: "app-1",
@@ -2001,18 +3225,69 @@ describe("workflow iteration rollover", () => {
         number: 2,
         status: "reviewing",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-916", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-916",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-2"],
         reviewerSession: "app-2",
       },
     ];
-    writeFileSync(workflow.iterations[1]!.planPath, "# PLAN\n\n- [x] TASK-01: Implemented\n", "utf-8");
-    writeFileSync(workflow.iterations[1]!.progressPath, "# Progress - Iteration 2\n\n- done\n", "utf-8");
-    writeFileSync(workflow.iterations[1]!.reviewFindingsPath, "(Pending reviewer output)\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[1]!.planPath,
+      "# PLAN\n\n- [x] TASK-01: Implemented\n",
+      "utf-8",
+    );
+    writeFileSync(
+      workflow.iterations[1]!.progressPath,
+      "# Progress - Iteration 2\n\n- done\n",
+      "utf-8",
+    );
+    writeFileSync(
+      workflow.iterations[1]!.reviewFindingsPath,
+      "(Pending reviewer output)\n",
+      "utf-8",
+    );
     saveWorkflowState(config.configPath, projectPath, workflow);
 
     const replacement = makeSession({
@@ -2053,7 +3328,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "resume-reviewer-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-917",
+        "iterations",
+        "iteration-002",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -2076,11 +3361,50 @@ describe("workflow iteration rollover", () => {
         status: "changes_requested",
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-6"],
         architectSession: "app-5",
         reviewerSession: "app-6",
@@ -2089,18 +3413,61 @@ describe("workflow iteration rollover", () => {
         number: 2,
         status: "reviewing",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-917", "iterations", "iteration-002", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-917",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-7"],
         reviewerSession: "app-7",
       },
     ];
 
     writeFileSync(workflow.iterations[1]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
-    writeFileSync(workflow.iterations[1]!.progressPath, "# Progress - Iteration 2\n\n- done\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[1]!.progressPath,
+      "# Progress - Iteration 2\n\n- done\n",
+      "utf-8",
+    );
     saveWorkflowState(config.configPath, projectPath, workflow);
 
     const restoredReviewer = makeSession({
@@ -2130,14 +3497,285 @@ describe("workflow iteration rollover", () => {
     expect(resumed.status).toBe("reviewing");
     expect(mockSessionManager.runCommand).toHaveBeenCalledTimes(1);
     expect(existsSync(workflow.iterations[1]!.reviewFindingsPath)).toBe(true);
-    expect(readFileSync(workflow.iterations[1]!.reviewFindingsPath, "utf-8")).toContain("Pending reviewer output");
+    expect(readFileSync(workflow.iterations[1]!.reviewFindingsPath, "utf-8")).toContain(
+      "Pending reviewer output",
+    );
+  });
+
+  it("resumeWorkflow fails instead of rolling beyond max iterations", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    config.projects["my-app"]!.workflow = {
+      enabled: true,
+      iterations: { maxIterations: 3, autoMergeOnApproval: false },
+    };
+    writeFileSync(
+      configPath,
+      [
+        "port: 3000",
+        "defaults:",
+        "  runtime: mock",
+        "  agent: mock-agent",
+        "  workspace: mock-ws",
+        "  notifiers:",
+        "    - desktop",
+        "projects:",
+        "  my-app:",
+        "    name: My App",
+        "    repo: org/my-app",
+        `    path: ${projectPath}`,
+        "    defaultBranch: main",
+        "    sessionPrefix: app",
+        "    scm:",
+        "      plugin: github",
+        "    workflow:",
+        "      enabled: true",
+        "      iterations:",
+        "        maxIterations: 3",
+        "        autoMergeOnApproval: false",
+      ].join("\n"),
+      "utf-8",
+    );
+    const worktreePath = join(tmpDir, "resume-max-limit-worktree");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-999",
+        "iterations",
+        "iteration-003",
+      ),
+      { recursive: true },
+    );
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "999",
+      "feat/999-from-main",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.ownerSessionId = "app-1";
+    workflow.maxIterations = 3;
+    workflow.currentIteration = 3;
+    workflow.status = "failed";
+    workflow.desiredStage = "architect";
+    workflow.desiredIteration = 3;
+    workflow.dispatchStatus = "pending";
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "approved",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
+        builderSessions: [],
+      },
+      {
+        number: 2,
+        status: "approved",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-002",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-002",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-002",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-002",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-002",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
+        builderSessions: [],
+      },
+      {
+        number: 3,
+        status: "changes_requested",
+        startedAt: new Date().toISOString(),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-003",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-003",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-003",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-003",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-999",
+          "iterations",
+          "iteration-003",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
+        builderSessions: [],
+        architectSession: "app-1",
+        reviewerSession: "app-1",
+      },
+    ];
+
+    writeFileSync(workflow.iterations[2]!.planPath, "# PLAN\n\n- [x] TASK-01: Done\n", "utf-8");
+    writeFileSync(workflow.iterations[2]!.progressPath, "# Progress - Iteration 3\n", "utf-8");
+    writeFileSync(workflow.iterations[2]!.orchestratorAnalysisPath, "# Analysis\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[2]!.reviewFindingsPath,
+      "## VERDICT: CHANGES REQUESTED\n",
+      "utf-8",
+    );
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    const session = makeSession({
+      id: "app-1",
+      status: "working",
+      activity: "ready",
+      branch: "feat/999-from-main",
+      workspacePath: worktreePath,
+      metadata: {
+        workflowId: workflow.id,
+        workflowStage: "reviewer",
+        workflowIteration: "3",
+        agent: "host-shell",
+      },
+    });
+
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    const wm = createWorkflowManager({
+      config,
+      registry: mockRegistry,
+      sessionManager: mockSessionManager,
+    });
+
+    const resumed = await wm.resumeWorkflow(workflow.id);
+
+    expect(resumed.status).toBe("failed");
+    expect(resumed.currentIteration).toBe(3);
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
   });
 
   it("stamps workflow metadata onto recovered owner sessions", async () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "stamp-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-905",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -2161,16 +3799,59 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-905", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-905",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-905",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-905",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-905",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-905",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1"],
       },
     ];
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -2206,7 +3887,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "cleanup-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-908",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -2230,15 +3921,58 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-908", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-908",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-908",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-908",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-908",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-908",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-1"],
       },
     ];
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -2333,17 +4067,66 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         builderSessions: ["app-1"],
         architectSession: "app-1",
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-777", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-777",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
     writeFileSync(
       workflow.iterations[0]!.planPath,
       "# PLAN\n\n- [x] TASK-01: Done\n- [x] TASK-02: Done\n",
@@ -2387,7 +4170,12 @@ describe("workflow iteration rollover", () => {
 
     await wm.spawnNextBuilder("wf-777");
 
-    const saved = JSON.parse(readFileSync(join(getProjectBaseDir(config.configPath, projectPath), "workflows", "wf-777.json"), "utf-8"));
+    const saved = JSON.parse(
+      readFileSync(
+        join(getProjectBaseDir(config.configPath, projectPath), "workflows", "wf-777.json"),
+        "utf-8",
+      ),
+    );
     expect(saved.status).toBe("reviewing");
     expect(saved.iterations[0].status).toBe("reviewing");
 
@@ -2427,18 +4215,71 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-888",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-888",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-888",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-888",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-888",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1"],
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-888", "iterations", "iteration-001"), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-888",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -2492,7 +4333,17 @@ describe("workflow iteration rollover", () => {
     const projectPath = config.projects["my-app"]!.path;
     mkdirSync(projectPath, { recursive: true });
     const worktreePath = join(tmpDir, "pending-active-builder-worktree");
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001"), { recursive: true });
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-911",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
 
     const workflow = createWorkflowState(
       config.configPath,
@@ -2518,17 +4369,60 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-911", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-911",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-911",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-911",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-911",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-911",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1", "app-2"],
       },
     ];
 
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -2608,18 +4502,71 @@ describe("workflow iteration rollover", () => {
         number: 1,
         status: "building",
         startedAt: new Date().toISOString(),
-        iterationDir: join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001"),
-        planPath: join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001", "PLAN.md"),
-        progressPath: join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001", "PROGRESS.md"),
-        orchestratorAnalysisPath: join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001", "orchestrator-analysis.md"),
-        reviewFindingsPath: join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001", "CODE_REVIEW_FINDINGS.md"),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-889",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-889",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-889",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-889",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-889",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
         architectSession: "app-1",
         builderSessions: ["app-1"],
       },
     ];
 
-    mkdirSync(join(worktreePath, ".architect-delivery", "projects", "issue-889", "iterations", "iteration-001"), { recursive: true });
-    writeFileSync(workflow.iterations[0]!.planPath, "# PLAN\n\n- [ ] TASK-01: Continue work\n", "utf-8");
+    mkdirSync(
+      join(
+        worktreePath,
+        ".architect-delivery",
+        "projects",
+        "issue-889",
+        "iterations",
+        "iteration-001",
+      ),
+      { recursive: true },
+    );
+    writeFileSync(
+      workflow.iterations[0]!.planPath,
+      "# PLAN\n\n- [ ] TASK-01: Continue work\n",
+      "utf-8",
+    );
     writeFileSync(workflow.iterations[0]!.progressPath, "# Progress - Iteration 1\n", "utf-8");
     saveWorkflowState(config.configPath, projectPath, workflow);
 
@@ -3598,6 +5545,130 @@ describe("reactions", () => {
     expect(mockNotifier.notify).toHaveBeenCalledWith(
       expect.objectContaining({ type: "merge.completed" }),
     );
+  });
+});
+
+describe("completed workflow follow-up backoff", () => {
+  it("defers completed-workflow follow-up retries after SCM rate limits", async () => {
+    const projectPath = config.projects["my-app"]!.path;
+    mkdirSync(projectPath, { recursive: true });
+    const worktreePath = join(tmpDir, "worktree-follow-up");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const mockScm: SCM = {
+      name: "github",
+      detectPR: vi.fn(),
+      resolvePR: vi.fn().mockRejectedValue(new Error("API rate limit already exceeded")),
+      getPRState: vi.fn(),
+      getPRSummary: vi.fn(),
+      mergePR: vi.fn(),
+      closePR: vi.fn(),
+      getCIChecks: vi.fn(),
+      getCISummary: vi.fn(),
+      getReviews: vi.fn(),
+      getReviewDecision: vi.fn(),
+      getPendingComments: vi.fn(),
+      getAutomatedComments: vi.fn(),
+      getMergeability: vi.fn(),
+    };
+
+    const registryWithScm: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "scm") return mockScm;
+        return null;
+      }),
+    };
+
+    const workflow = createWorkflowState(
+      config.configPath,
+      config.projects["my-app"]!,
+      "my-app",
+      "777",
+      "feat/777-from-main",
+      "main",
+    );
+    workflow.worktreePath = worktreePath;
+    workflow.currentIteration = 1;
+    workflow.status = "completed";
+    workflow.iterations = [
+      {
+        number: 1,
+        status: "approved",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        iterationDir: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+        ),
+        planPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "PLAN.md",
+        ),
+        progressPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "PROGRESS.md",
+        ),
+        orchestratorAnalysisPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "orchestrator-analysis.md",
+        ),
+        reviewFindingsPath: join(
+          worktreePath,
+          ".architect-delivery",
+          "projects",
+          "issue-777",
+          "iterations",
+          "iteration-001",
+          "CODE_REVIEW_FINDINGS.md",
+        ),
+        builderSessions: [],
+      },
+    ];
+    workflow.artifacts.prs = ["https://github.com/org/repo/pull/42"];
+    saveWorkflowState(config.configPath, projectPath, workflow);
+
+    vi.mocked(mockSessionManager.list).mockResolvedValue([]);
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithScm,
+      sessionManager: mockSessionManager,
+    });
+    lm.start(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    lm.stop();
+
+    const updated = loadWorkflowState(config.configPath, projectPath, workflow.id);
+
+    expect(updated?.followUpRetryAt).toBeTruthy();
+    expect(mockScm.resolvePR).toHaveBeenCalledTimes(1);
+
+    lm.start(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    lm.stop();
+    expect(mockScm.resolvePR).toHaveBeenCalledTimes(1);
   });
 });
 

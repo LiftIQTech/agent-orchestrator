@@ -92,6 +92,8 @@ describe("tracker-github plugin", () => {
         state: "open",
         labels: ["bug", "priority-high"],
         assignee: "alice",
+        linkedBranch: undefined,
+        linkedBranches: [],
       });
     });
 
@@ -127,11 +129,16 @@ describe("tracker-github plugin", () => {
     it("falls back when gh does not support stateReason field", async () => {
       mockGhError('gh issue view failed: Unknown JSON field "stateReason"');
       mockGh({ ...sampleIssue, stateReason: undefined });
+      ghMock.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: { repository: { issue: { linkedBranches: { nodes: [] } } } },
+        }),
+      });
 
       const issue = await tracker.getIssue("123", project);
 
       expect(issue.state).toBe("open");
-      expect(ghMock).toHaveBeenCalledTimes(2);
+      expect(ghMock).toHaveBeenCalledTimes(4);
       expect(ghMock.mock.calls[0]?.[1]).toEqual(
         expect.arrayContaining([expect.stringContaining("state,stateReason")]),
       );
@@ -143,11 +150,16 @@ describe("tracker-github plugin", () => {
     it("falls back on alternative unknown-field phrasing for stateReason", async () => {
       mockGhError("gh issue view failed: invalid field 'stateReason'");
       mockGh({ ...sampleIssue, stateReason: undefined });
+      ghMock.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: { repository: { issue: { linkedBranches: { nodes: [] } } } },
+        }),
+      });
 
       const issue = await tracker.getIssue("123", project);
 
       expect(issue.state).toBe("open");
-      expect(ghMock).toHaveBeenCalledTimes(2);
+      expect(ghMock).toHaveBeenCalledTimes(4);
     });
 
     it("does not swallow unrelated unknown-field errors", async () => {
@@ -162,6 +174,29 @@ describe("tracker-github plugin", () => {
     it("throws on malformed JSON response", async () => {
       ghMock.mockResolvedValueOnce({ stdout: "not json{" });
       await expect(tracker.getIssue("123", project)).rejects.toThrow();
+    });
+
+    it("includes linked issue branch metadata when present", async () => {
+      mockGh(sampleIssue);
+      ghMock.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+      ghMock.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              issue: {
+                linkedBranches: {
+                  nodes: [{ ref: { name: "feature/579-kpis-pg-to-ddb" } }],
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      const issue = await tracker.getIssue("123", project);
+
+      expect(issue.linkedBranch).toBe("feature/579-kpis-pg-to-ddb");
+      expect(issue.linkedBranches).toEqual(["feature/579-kpis-pg-to-ddb"]);
     });
   });
 

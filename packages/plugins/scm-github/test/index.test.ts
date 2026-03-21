@@ -184,6 +184,91 @@ describe("scm-github plugin", () => {
     });
   });
 
+  describe("createPR", () => {
+    it("returns an existing PR when branch push loses a race", async () => {
+      ghMock
+        .mockRejectedValueOnce(
+          new Error(
+            "git push -u origin failed: error: failed to push some refs to 'https://github.com/acme/repo.git'",
+          ),
+        )
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([
+            {
+              number: 77,
+              url: "https://github.com/acme/repo/pull/77",
+              title: "architect: issue 641 workflow branch",
+              headRefName: "feat/my-feature",
+              baseRefName: "main",
+              isDraft: true,
+              state: "OPEN",
+            },
+          ]),
+        });
+
+      await expect(
+        scm.createPR?.(project, {
+          branch: "feat/my-feature",
+          baseBranch: "main",
+          title: "architect: issue 641 workflow branch",
+          body: "Deterministic workflow PR for issue #641.",
+          draft: true,
+        }),
+      ).resolves.toEqual({
+        number: 77,
+        url: "https://github.com/acme/repo/pull/77",
+        title: "architect: issue 641 workflow branch",
+        owner: "acme",
+        repo: "repo",
+        branch: "feat/my-feature",
+        baseBranch: "main",
+        isDraft: true,
+      });
+
+      expect(ghMock).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["push", "-u", "origin", "feat/my-feature"],
+        expect.objectContaining({ cwd: "/tmp/repo" }),
+      );
+      expect(ghMock).toHaveBeenNthCalledWith(
+        2,
+        "gh",
+        [
+          "pr",
+          "list",
+          "--repo",
+          "acme/repo",
+          "--head",
+          "feat/my-feature",
+          "--state",
+          "all",
+          "--json",
+          "number,url,title,headRefName,baseRefName,isDraft,state",
+          "--limit",
+          "20",
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it("rethrows push failures when no matching PR exists", async () => {
+      ghMock
+        .mockRejectedValueOnce(new Error("git push -u origin failed: non-fast-forward"))
+        .mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+
+      await expect(
+        scm.createPR?.(project, {
+          branch: "feat/my-feature",
+          baseBranch: "main",
+          title: "architect: issue 641 workflow branch",
+          body: "Deterministic workflow PR for issue #641.",
+          draft: true,
+        }),
+      ).rejects.toThrow("git push -u origin failed: non-fast-forward");
+    });
+  });
+
   // ---- getPRState --------------------------------------------------------
 
   describe("getPRState", () => {

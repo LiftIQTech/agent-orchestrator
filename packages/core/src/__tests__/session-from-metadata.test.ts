@@ -17,4 +17,15 @@ describe("sessionFromMetadata", () => {
     expect(session.pr?.branch).toBe("feat/workflow-branch");
     expect(session.pr?.baseBranch).toBe("feature/579-kpis-pg-to-ddb");
   });
+
+  it("falls back to projectId metadata when project is missing", () => {
+    const session = sessionFromMetadata("app-1", {
+      projectId: "app",
+      worktree: "/tmp/worktree",
+      branch: "feat/local-branch",
+      status: "working",
+    });
+
+    expect(session.projectId).toBe("app");
+  });
 });

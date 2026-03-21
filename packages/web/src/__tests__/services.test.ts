@@ -268,8 +268,7 @@ describe("pollBacklog", () => {
       "641",
       {
         labels: ["agent:in-progress"],
-        removeLabels: ["agent:backlog"],
-        comment: "Claimed by agent orchestrator — architect workflow started.",
+        removeLabels: ["agent:backlog", "agent:pending-merge"],
       },
       expect.objectContaining({ tracker: { plugin: "github" } }),
     );

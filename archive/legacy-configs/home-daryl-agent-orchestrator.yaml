@@ -1,0 +1,34 @@
+# Agent Orchestrator — isolated setup for knowledge-brain, lift-iq
+# All repos cloned fresh to ~/.ao-clones/ (not touching existing worktrees)
+
+dataDir: ~/.ao-sessions
+worktreeDir: ~/.worktrees/ao
+
+defaults:
+  runtime: tmux
+  agent: opencode
+  workspace: clone
+  notifiers: [desktop]
+
+projects:
+  knowledge-brain:
+    name: Knowledge Brain
+    repo: liftiqtech/knowledge-brain
+    path: ~/agent-orchestrator/repos/knowledge-brain-base
+    defaultBranch: main
+    tracker:
+      plugin: github
+    scm:
+      plugin: github
+
+  lift-iq:
+    name: Lift IQ
+    repo: LiftIQTech/lift-iq
+    path: ~/agent-orchestrator/repos/lift-iq-base
+    defaultBranch: main
+
+  agent-orchestrator:
+    name: Agent Orchestrator
+    repo: ComposioHQ/agent-orchestrator
+    path: ~/agent-orchestrator/repos/agent-orchestrator-base
+    defaultBranch: main

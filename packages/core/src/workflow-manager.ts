@@ -8,7 +8,16 @@
  * 4. If changes requested, new iteration with architect
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, readdirSync, unlinkSync, cpSync } from "node:fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+  appendFileSync,
+  readdirSync,
+  unlinkSync,
+  cpSync,
+} from "node:fs";
 import { execFile } from "node:child_process";
 import { join, dirname, basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -21,12 +30,12 @@ import type {
   WorkflowStage,
   IterationState,
   Session,
-    SessionManager,
-    PluginRegistry,
-    Issue,
-    Tracker,
-    SCM,
-    Workspace,
+  SessionManager,
+  PluginRegistry,
+  Issue,
+  Tracker,
+  SCM,
+  Workspace,
 } from "./types.js";
 import {
   createWorkflowState,
@@ -36,12 +45,12 @@ import {
   getRequirementsPath,
 } from "./workflow-state.js";
 import { createTaskManager } from "./task-manager.js";
-import { 
-  loadPromptFile, 
-  buildPromptContext, 
-  renderPrompt, 
+import {
+  loadPromptFile,
+  buildPromptContext,
+  renderPrompt,
   writeProgressEntry,
-  type PromptContext 
+  type PromptContext,
 } from "./prompt-loader.js";
 import { updateMetadata } from "./metadata.js";
 import { getSessionsDir, getProjectBaseDir } from "./paths.js";
@@ -59,7 +68,11 @@ export interface WorkflowManager {
   spawnNextBuilder(workflowId: string): Promise<Session | null>;
   spawnReviewer(workflow: WorkflowState, project: ProjectConfig): Promise<Session>;
   handleReviewComplete(workflowId: string, approved: boolean, feedback?: string): Promise<void>;
-  reopenWorkflow(workflowId: string, reason: string, preferredStage?: WorkflowStage): Promise<WorkflowState>;
+  reopenWorkflow(
+    workflowId: string,
+    reason: string,
+    preferredStage?: WorkflowStage,
+  ): Promise<WorkflowState>;
   resumeWorkflow(workflowId: string): Promise<WorkflowState>;
   getWorkflow(projectId: string, workflowId: string): WorkflowState | null;
   listWorkflows(projectId: string): WorkflowState[];
@@ -73,12 +86,65 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
 
   const WORKFLOW_GUARDRAILS = `\n\n## Deterministic Workflow Guardrails (MANDATORY)\n\n- DO NOT create or update pull requests with gh/CLI tools.\n- DO NOT create/switch branches (no git checkout -b, no git switch).\n- DO NOT rebase or merge branches.\n- Stay on the provided branch for this workflow session.\n- Only modify files required by requirements + PLAN tasks for this issue.\n`;
 
-  function makeWorkflowBranch(issueId: string, baseBranch?: string, defaultBranch?: string): string {
+  function makeWorkflowBranch(
+    issueId: string,
+    baseBranch?: string,
+    defaultBranch?: string,
+  ): string {
     if (!baseBranch || !defaultBranch || baseBranch === defaultBranch) {
       return `feat/${issueId}`;
     }
-    const slug = baseBranch.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const slug = baseBranch
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
     return `feat/${issueId}-from-${slug}`;
+  }
+
+  async function pruneProjectWorktrees(project: ProjectConfig): Promise<void> {
+    try {
+      await execFileAsync("git", ["worktree", "prune", "--verbose"], { cwd: project.path });
+    } catch {
+      // Best-effort preflight only.
+    }
+  }
+
+  async function resolveWorkflowBaseBranch(
+    project: ProjectConfig,
+    issueId: string,
+    requestedBaseBranch?: string,
+  ): Promise<{
+    baseBranch: string;
+    source: "explicit" | "issue-linked" | "project-default";
+    issue?: Issue;
+  }> {
+    if (requestedBaseBranch && requestedBaseBranch.length > 0) {
+      return { baseBranch: requestedBaseBranch, source: "explicit" };
+    }
+
+    const tracker = project.tracker
+      ? registry.get<Tracker>("tracker", project.tracker.plugin)
+      : null;
+    if (tracker) {
+      try {
+        const issue = await tracker.getIssue(issueId, project);
+        if (issue.linkedBranches && issue.linkedBranches.length > 1) {
+          throw new Error(
+            `Issue ${issueId} has multiple linked branches: ${issue.linkedBranches.join(", ")}. Pass --base-branch explicitly.`,
+          );
+        }
+        if (issue.linkedBranch && issue.linkedBranch.length > 0) {
+          return { baseBranch: issue.linkedBranch, source: "issue-linked", issue };
+        }
+        return { baseBranch: project.defaultBranch, source: "project-default", issue };
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("multiple linked branches")) {
+          throw err;
+        }
+      }
+    }
+
+    return { baseBranch: project.defaultBranch, source: "project-default" };
   }
 
   function getWorkflowSessionIds(workflow: WorkflowState): string[] {
@@ -170,7 +236,12 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
   function rebindWorkflowArtifactsToWorktree(workflow: WorkflowState): void {
     if (!workflow.worktreePath) return;
 
-    const issueRoot = join(workflow.worktreePath, ".architect-delivery", "projects", `issue-${workflow.issueId}`);
+    const issueRoot = join(
+      workflow.worktreePath,
+      ".architect-delivery",
+      "projects",
+      `issue-${workflow.issueId}`,
+    );
     const requirementsPath = join(issueRoot, "requirements.md");
 
     for (const iteration of workflow.iterations) {
@@ -188,18 +259,28 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
   }
 
   function archiveWorkflowProject(workflow: WorkflowState, project: ProjectConfig): void {
-    const sourceFromRepo = join(project.path, ".architect-delivery", "projects", `issue-${workflow.issueId}`);
+    const sourceFromRepo = join(
+      project.path,
+      ".architect-delivery",
+      "projects",
+      `issue-${workflow.issueId}`,
+    );
     const sourceFromWorktree = workflow.worktreePath
       ? join(workflow.worktreePath, ".architect-delivery", "projects", `issue-${workflow.issueId}`)
       : "";
     const sourceDir = existsSync(sourceFromRepo)
       ? sourceFromRepo
       : sourceFromWorktree && existsSync(sourceFromWorktree)
-      ? sourceFromWorktree
-      : "";
+        ? sourceFromWorktree
+        : "";
     if (!sourceDir) return;
 
-    const completedRoot = join(project.path, ".architect-delivery", "completed", `issue-${workflow.issueId}`);
+    const completedRoot = join(
+      project.path,
+      ".architect-delivery",
+      "completed",
+      `issue-${workflow.issueId}`,
+    );
     mkdirSync(dirname(completedRoot), { recursive: true });
     cpSync(sourceDir, completedRoot, { recursive: true, force: true });
   }
@@ -233,20 +314,26 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
     );
     copyIfExists(iteration.reviewFindingsPath, join(repoIterationDir, "CODE_REVIEW_FINDINGS.md"));
 
-    const requirementsSource = join(
-      dirname(dirname(iteration.iterationDir)),
-      "requirements.md",
-    );
+    const requirementsSource = join(dirname(dirname(iteration.iterationDir)), "requirements.md");
     copyIfExists(
       requirementsSource,
-      join(project.path, ".architect-delivery", "projects", `issue-${workflow.issueId}`, "requirements.md"),
+      join(
+        project.path,
+        ".architect-delivery",
+        "projects",
+        `issue-${workflow.issueId}`,
+        "requirements.md",
+      ),
     );
   }
 
   function ensureProgressArtifact(iteration: IterationState): void {
     if (!existsSync(iteration.progressPath)) return;
     const content = readFileSync(iteration.progressPath, "utf-8");
-    const nonEmptyLines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+    const nonEmptyLines = content
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (nonEmptyLines.length > 4) return;
 
     let completedTasks = "";
@@ -333,7 +420,9 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
     const recordedStage = session.metadata["workflowStage"];
     const recordedIteration = session.metadata["workflowIteration"];
     const recordedBuilderIteration = session.metadata["builderIteration"];
-    const hasRecordedIntent = Boolean(recordedStage || recordedIteration || recordedBuilderIteration);
+    const hasRecordedIntent = Boolean(
+      recordedStage || recordedIteration || recordedBuilderIteration,
+    );
     if (!hasRecordedIntent) return true;
 
     return ownerSessionMatchesIntent(session, workflow, stage, iterationNumber, builderIteration);
@@ -410,7 +499,10 @@ export function createWorkflowManager(deps: WorkflowManagerDeps): WorkflowManage
     workflow.lastStageActivityAt = now;
   }
 
-  function loadWorkflowOrThrow(workflowId: string): { workflow: WorkflowState; project: ProjectConfig } {
+  function loadWorkflowOrThrow(workflowId: string): {
+    workflow: WorkflowState;
+    project: ProjectConfig;
+  } {
     for (const [_, project] of Object.entries(config.projects)) {
       const workflow = loadWorkflowState(config.configPath, project.path, workflowId);
       if (workflow) {
@@ -497,6 +589,32 @@ Issue: ${issueId}
     return stageForIterationStatus(iteration.status) === stage;
   }
 
+  function iterationNeedsRollover(iteration: IterationState): boolean {
+    return iteration.status === "changes_requested";
+  }
+
+  function hasReachedIterationLimit(
+    workflow: WorkflowState,
+    nextIteration = workflow.currentIteration + 1,
+  ): boolean {
+    return nextIteration > workflow.maxIterations;
+  }
+
+  function failWorkflowAtIterationLimit(
+    workflow: WorkflowState,
+    iteration: IterationState,
+    reason: string,
+  ): void {
+    iteration.status = "changes_requested";
+    if (!iteration.completedAt) {
+      iteration.completedAt = new Date().toISOString();
+    }
+    workflow.status = "failed";
+    workflow.dispatchStatus = "completed";
+    workflow.lastReopenReason = reason;
+    workflow.lastReopenAt = new Date().toISOString();
+  }
+
   function builderArtifactsReadyForAdvance(
     workflow: WorkflowState,
     iteration: IterationState,
@@ -564,7 +682,14 @@ Issue: ${issueId}
       workflow.ownerSessionId = session.id;
       rebindWorkflowArtifactsToWorktree(workflow);
       persistWorkflow(project.path, workflow);
-      stampOwnerSessionMetadata(project.path, session.id, workflow, stage, iterationNumber, builderIteration);
+      stampOwnerSessionMetadata(
+        project.path,
+        session.id,
+        workflow,
+        stage,
+        iterationNumber,
+        builderIteration,
+      );
       await cleanupSupersededWorkflowOwners(workflow, session.id);
       return session;
     };
@@ -579,7 +704,7 @@ Issue: ${issueId}
 
     const spawnFreshOwnerSession = async (): Promise<Session | null> => {
       const reusableWorkspacePath = workflow.worktreePath
-        ? await ownerWorkspaceUsable({ workspacePath: workflow.worktreePath } as Session)
+        ? (await ownerWorkspaceUsable({ workspacePath: workflow.worktreePath } as Session))
           ? workflow.worktreePath
           : undefined
         : undefined;
@@ -605,7 +730,9 @@ Issue: ${issueId}
 
       await sleep(400);
       const confirmed = await sessionManager.get(candidate.id);
-      if (ownerSessionMatchesDispatch(confirmed, workflow, stage, iterationNumber, builderIteration)) {
+      if (
+        ownerSessionMatchesDispatch(confirmed, workflow, stage, iterationNumber, builderIteration)
+      ) {
         return confirmed;
       }
 
@@ -661,7 +788,15 @@ Issue: ${issueId}
       try {
         if (workflow.ownerSessionId) {
           const restored = await restoreWorkflowOwner(workflow.ownerSessionId);
-          if (ownerSessionMatchesDispatch(restored, workflow, stage, iterationNumber, builderIteration)) {
+          if (
+            ownerSessionMatchesDispatch(
+              restored,
+              workflow,
+              stage,
+              iterationNumber,
+              builderIteration,
+            )
+          ) {
             session = restored;
             break;
           }
@@ -675,7 +810,9 @@ Issue: ${issueId}
     }
 
     if (!session) {
-      throw lastError ?? new Error(`Failed to create durable workflow owner session for ${workflow.id}`);
+      throw (
+        lastError ?? new Error(`Failed to create durable workflow owner session for ${workflow.id}`)
+      );
     }
 
     return adoptOwnerSession(session);
@@ -704,7 +841,7 @@ Issue: ${issueId}
             identifier: issue.id,
             title: issue.title,
             description: issue.description ?? "",
-            url: tracker.issueUrl ? tracker.issueUrl(workflow.issueId, project) : issue.url ?? "",
+            url: tracker.issueUrl ? tracker.issueUrl(workflow.issueId, project) : (issue.url ?? ""),
           };
         } catch {
           // Non-fatal: continue without issue context
@@ -814,6 +951,15 @@ Issue: ${issueId}
         pr = await createDeterministicPR();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (
+          message.includes("API rate limit already exceeded") ||
+          message.includes("secondary rate limit") ||
+          message.includes("rate limit exceeded")
+        ) {
+          throw new Error(`SCM rate limited while ensuring workflow PR for ${workflow.id}`, {
+            cause: err,
+          });
+        }
         if (!message.includes("No commits between")) {
           throw err;
         }
@@ -845,7 +991,10 @@ Issue: ${issueId}
     });
   }
 
-  async function createWorkflowBootstrapCommit(projectPath: string, workflow: WorkflowState): Promise<void> {
+  async function createWorkflowBootstrapCommit(
+    projectPath: string,
+    workflow: WorkflowState,
+  ): Promise<void> {
     if (!workflow.worktreePath) return;
 
     const requirementsPath = getRequirementsPath(
@@ -886,7 +1035,9 @@ Issue: ${issueId}
     iteration: IterationState,
   ): Promise<void> {
     const scm = project.scm ? registry.get<SCM>("scm", project.scm.plugin) : null;
-    const tracker = project.tracker ? registry.get<Tracker>("tracker", project.tracker.plugin) : null;
+    const tracker = project.tracker
+      ? registry.get<Tracker>("tracker", project.tracker.plugin)
+      : null;
     const prReference = workflow.artifacts.prs.at(-1);
 
     if (prReference && scm?.resolvePR) {
@@ -902,8 +1053,7 @@ Issue: ${issueId}
         {
           labels: ["agent:pending-merge"],
           removeLabels: ["agent:in-progress", "agent:backlog"],
-          comment:
-            `Architect workflow completed in iteration ${iteration.number}. PR is ready for review and awaiting merge.`,
+          comment: `Architect workflow completed in iteration ${iteration.number}. PR is ready for review and awaiting merge.`,
         },
         project,
       );
@@ -936,7 +1086,8 @@ Issue: ${issueId}
           const issue = await tracker.getIssue(workflow.issueId, project);
           issueTitle = issue.title;
           issueDescription = issue.description ?? "";
-          issueUrl = issue.url ?? (tracker.issueUrl ? tracker.issueUrl(workflow.issueId, project) : "");
+          issueUrl =
+            issue.url ?? (tracker.issueUrl ? tracker.issueUrl(workflow.issueId, project) : "");
         } catch {
           // Best-effort scaffold only
         }
@@ -961,7 +1112,7 @@ Issue: ${issueId}
   async function startWorkflow(
     projectId: string,
     issueId: string,
-    baseBranch?: string
+    baseBranch?: string,
   ): Promise<WorkflowState> {
     const project = config.projects[projectId];
     if (!project) throw new Error(`Unknown project: ${projectId}`);
@@ -976,12 +1127,18 @@ Issue: ${issueId}
     if (existing && existing.status !== "completed" && existing.status !== "failed") {
       const hasLiveSessions = await hasLiveWorkflowSessions(existing);
       if (hasLiveSessions) {
-        throw new Error(`Workflow already exists for ${issueId}: ${existing.id} (status: ${existing.status})`);
+        throw new Error(
+          `Workflow already exists for ${issueId}: ${existing.id} (status: ${existing.status})`,
+        );
       }
     }
 
+    await pruneProjectWorktrees(project);
+
+    const resolvedBase = await resolveWorkflowBaseBranch(project, issueId, baseBranch);
+
     // Determine branch
-    const branch = makeWorkflowBranch(issueId, baseBranch, project.defaultBranch);
+    const branch = makeWorkflowBranch(issueId, resolvedBase.baseBranch, project.defaultBranch);
 
     // Create workflow state
     const workflow = createWorkflowState(
@@ -990,7 +1147,8 @@ Issue: ${issueId}
       projectId,
       issueId,
       branch,
-      baseBranch,
+      resolvedBase.baseBranch,
+      resolvedBase.source,
     );
 
     // Create host shell session + worktree
@@ -999,7 +1157,7 @@ Issue: ${issueId}
       issueId,
       skipIssueValidation: true,
       branch,
-      baseBranch,
+      baseBranch: resolvedBase.baseBranch,
       agent: "host-shell",
       workflowId: workflow.id,
       workflowStage: "architect",
@@ -1018,6 +1176,21 @@ Issue: ${issueId}
 
     persistWorkflow(project.path, workflow);
 
+    const tracker = project.tracker
+      ? registry.get<Tracker>("tracker", project.tracker.plugin)
+      : null;
+    if (tracker?.updateIssue) {
+      await tracker.updateIssue(
+        issueId,
+        {
+          labels: ["agent:in-progress"],
+          removeLabels: ["agent:backlog", "agent:pending-merge"],
+          comment: "Claimed by agent orchestrator - architect workflow started.",
+        },
+        project,
+      );
+    }
+
     await ensureWorkflowRequirementsScaffold(project.path, workflow);
 
     await ensureWorkflowPR(workflow, project, session);
@@ -1035,10 +1208,20 @@ Issue: ${issueId}
   /**
    * Spawn architect for new or continued iteration
    */
-  async function spawnArchitect(
-    workflow: WorkflowState,
-    project: ProjectConfig
-  ): Promise<Session> {
+  async function spawnArchitect(workflow: WorkflowState, project: ProjectConfig): Promise<Session> {
+    if (hasReachedIterationLimit(workflow)) {
+      const current = workflow.iterations[workflow.currentIteration - 1];
+      if (current) {
+        failWorkflowAtIterationLimit(
+          workflow,
+          current,
+          `Max iterations (${workflow.maxIterations}) reached before starting a new architect iteration.`,
+        );
+        persistWorkflow(project.path, workflow);
+      }
+      throw new Error(`Max iterations (${workflow.maxIterations}) reached`);
+    }
+
     // Create new iteration
     const iteration = startNewIteration(
       config.configPath,
@@ -1125,7 +1308,7 @@ Issue: ${issueId}
 
     // Build prompt context
     const baseContext = buildPromptContext(config, workflow.projectId, workflow, iteration);
-    
+
     // Fetch issue context
     let issueContext: Partial<PromptContext["issue"]> = {};
     if (project.tracker) {
@@ -1158,9 +1341,15 @@ Issue: ${issueId}
       .replace("{{progressPath}}", iteration.progressPath)
       .replace("{{orchestratorAnalysisPath}}", context.orchestratorAnalysisPath)
       .replace("{{reviewFindingsPath}}", context.reviewFindingsPath);
-    
+
     const prompt = `${renderPrompt(template, context)}${WORKFLOW_GUARDRAILS}`;
-    const session = await dispatchStageCommand(workflow, prompt, "builder", iteration.number, builderNum);
+    const session = await dispatchStageCommand(
+      workflow,
+      prompt,
+      "builder",
+      iteration.number,
+      builderNum,
+    );
 
     await ensureWorkflowPR(workflow, project, session);
 
@@ -1183,15 +1372,12 @@ Issue: ${issueId}
   /**
    * Spawn reviewer
    */
-  async function spawnReviewer(
-    workflow: WorkflowState,
-    project: ProjectConfig
-  ): Promise<Session> {
+  async function spawnReviewer(workflow: WorkflowState, project: ProjectConfig): Promise<Session> {
     const iteration = workflow.iterations[workflow.currentIteration - 1];
 
     // Build prompt context
     const baseContext = buildPromptContext(config, workflow.projectId, workflow, iteration);
-    
+
     // Fetch issue context
     let issueContext: Partial<PromptContext["issue"]> = {};
     if (project.tracker) {
@@ -1260,7 +1446,7 @@ Issue: ${issueId}
   async function handleReviewComplete(
     workflowId: string,
     approved: boolean,
-    feedback?: string
+    feedback?: string,
   ): Promise<void> {
     // Find the workflow
     let workflow: WorkflowState | null = null;
@@ -1308,9 +1494,11 @@ Issue: ${issueId}
 
     // Check iteration limit
     if (workflow.currentIteration >= workflow.maxIterations) {
-      iteration.status = "changes_requested";
-      iteration.completedAt = new Date().toISOString();
-      workflow.status = "failed";
+      failWorkflowAtIterationLimit(
+        workflow,
+        iteration,
+        `Max iterations (${workflow.maxIterations}) reached`,
+      );
       setWorkflowIntent(workflow, "reviewer", iteration.number, 0, "completed");
       persistWorkflow(project.path, workflow);
       throw new Error(`Max iterations (${workflow.maxIterations}) reached`);
@@ -1361,30 +1549,73 @@ Issue: ${issueId}
     const normalizedPreferredStage = preferredStage === "reviewer" ? "architect" : preferredStage;
     const feedbackPath = join(dirname(iteration.progressPath), "review-feedback.md");
 
+    const shouldStartFreshIteration =
+      workflow.status === "completed" ||
+      workflow.status === "failed" ||
+      iteration.status === "changes_requested";
+
     if (workflow.status === "completed") {
       iteration.status = "changes_requested";
       iteration.completedAt = undefined;
     }
 
-    iteration.status = normalizedPreferredStage === "builder" ? "building" : "planning";
-    workflow.status = normalizedPreferredStage === "builder" ? "building" : "planning";
-    workflow.ownerSessionId = "";
-    workflow.currentBuilderIteration = normalizedPreferredStage === "builder" ? 1 : 0;
-    workflow.lastReopenReason = reason;
-    workflow.lastReopenAt = new Date().toISOString();
-    setWorkflowIntent(
-      workflow,
-      normalizedPreferredStage,
-      iteration.number,
-      normalizedPreferredStage === "builder" ? 1 : 0,
-      "pending",
-    );
+    if (shouldStartFreshIteration && hasReachedIterationLimit(workflow)) {
+      failWorkflowAtIterationLimit(
+        workflow,
+        iteration,
+        `Max iterations (${workflow.maxIterations}) reached while reopening workflow.`,
+      );
+      persistWorkflow(project.path, workflow);
+      return workflow;
+    }
 
-    mkdirSync(dirname(feedbackPath), { recursive: true });
-    writeFileSync(feedbackPath, reason, "utf-8");
-    persistWorkflow(project.path, workflow);
+    if (shouldStartFreshIteration) {
+      iteration.status = "changes_requested";
+      if (!iteration.completedAt) {
+        iteration.completedAt = new Date().toISOString();
+      }
+      ensureProgressArtifact(iteration);
+      mkdirSync(dirname(feedbackPath), { recursive: true });
+      writeFileSync(feedbackPath, reason, "utf-8");
+      await cleanupIterationSessions(workflow, iteration, { includeOwner: true });
 
-    const tracker = project.tracker ? registry.get<Tracker>("tracker", project.tracker.plugin) : null;
+      const nextIteration = startNewIteration(
+        config.configPath,
+        project.path,
+        workflow,
+        workflow.worktreePath,
+      );
+      normalizeIterationArtifacts(workflow, nextIteration);
+      workflow.status = "planning";
+      workflow.ownerSessionId = "";
+      workflow.currentBuilderIteration = 0;
+      workflow.lastReopenReason = reason;
+      workflow.lastReopenAt = new Date().toISOString();
+      setWorkflowIntent(workflow, "architect", nextIteration.number, 0, "pending");
+      persistWorkflow(project.path, workflow);
+    } else {
+      iteration.status = normalizedPreferredStage === "builder" ? "building" : "planning";
+      workflow.status = normalizedPreferredStage === "builder" ? "building" : "planning";
+      workflow.ownerSessionId = "";
+      workflow.currentBuilderIteration = normalizedPreferredStage === "builder" ? 1 : 0;
+      workflow.lastReopenReason = reason;
+      workflow.lastReopenAt = new Date().toISOString();
+      setWorkflowIntent(
+        workflow,
+        normalizedPreferredStage,
+        iteration.number,
+        normalizedPreferredStage === "builder" ? 1 : 0,
+        "pending",
+      );
+
+      mkdirSync(dirname(feedbackPath), { recursive: true });
+      writeFileSync(feedbackPath, reason, "utf-8");
+      persistWorkflow(project.path, workflow);
+    }
+
+    const tracker = project.tracker
+      ? registry.get<Tracker>("tracker", project.tracker.plugin)
+      : null;
     if (tracker?.updateIssue) {
       await tracker.updateIssue(
         workflow.issueId,
@@ -1417,16 +1648,65 @@ Issue: ${issueId}
     const { workflow, project } = loadWorkflowOrThrow(workflowId);
 
     rebindWorkflowArtifactsToWorktree(workflow);
-    persistWorkflow(project.path, workflow);
-
-    const iteration = workflow.iterations[workflow.currentIteration - 1];
+    let iteration = workflow.iterations[workflow.currentIteration - 1];
     if (!iteration) {
       throw new Error(`No current iteration for workflow: ${workflowId}`);
     }
 
-    let desiredStage = workflow.desiredStage ?? (iteration.status === "reviewing" ? "reviewer" : iteration.status === "building" ? "builder" : "architect");
+    if (iterationNeedsRollover(iteration)) {
+      if (hasReachedIterationLimit(workflow)) {
+        failWorkflowAtIterationLimit(
+          workflow,
+          iteration,
+          `Max iterations (${workflow.maxIterations}) reached while resuming workflow.`,
+        );
+        persistWorkflow(project.path, workflow);
+        return workflow;
+      }
+      if (!iteration.completedAt) {
+        iteration.completedAt = new Date().toISOString();
+      }
+      const feedbackPath = join(dirname(iteration.progressPath), "review-feedback.md");
+      mkdirSync(dirname(feedbackPath), { recursive: true });
+      if (!existsSync(feedbackPath)) {
+        writeFileSync(feedbackPath, workflow.lastReopenReason ?? "Changes requested", "utf-8");
+      }
+      await cleanupIterationSessions(workflow, iteration, { includeOwner: true });
+      workflow.ownerSessionId = "";
+      workflow.currentBuilderIteration = 0;
+      const nextIteration = startNewIteration(
+        config.configPath,
+        project.path,
+        workflow,
+        workflow.worktreePath,
+      );
+      normalizeIterationArtifacts(workflow, nextIteration);
+      workflow.status = "planning";
+      setWorkflowIntent(workflow, "architect", nextIteration.number, 0, "pending");
+      persistWorkflow(project.path, workflow);
+      iteration = nextIteration;
+    }
+
+    if (
+      workflow.status === "failed" &&
+      iteration.status === "changes_requested" &&
+      workflow.currentIteration >= workflow.maxIterations
+    ) {
+      return workflow;
+    }
+
+    persistWorkflow(project.path, workflow);
+
+    let desiredStage =
+      workflow.desiredStage ??
+      (iteration.status === "reviewing"
+        ? "reviewer"
+        : iteration.status === "building"
+          ? "builder"
+          : "architect");
     let desiredIteration = workflow.desiredIteration ?? workflow.currentIteration;
-    let desiredBuilderIteration = workflow.desiredBuilderIteration ?? workflow.currentBuilderIteration;
+    let desiredBuilderIteration =
+      workflow.desiredBuilderIteration ?? workflow.currentBuilderIteration;
 
     if (
       desiredIteration !== iteration.number ||
@@ -1438,7 +1718,13 @@ Issue: ${issueId}
       desiredIteration = iteration.number;
       desiredBuilderIteration =
         normalizedStage === "builder" ? Math.max(workflow.currentBuilderIteration, 1) : 0;
-      setWorkflowIntent(workflow, normalizedStage, desiredIteration, desiredBuilderIteration, "pending");
+      setWorkflowIntent(
+        workflow,
+        normalizedStage,
+        desiredIteration,
+        desiredBuilderIteration,
+        "pending",
+      );
       persistWorkflow(project.path, workflow);
     }
 
@@ -1467,11 +1753,19 @@ Issue: ${issueId}
     if (desiredStage === "reviewer" && iteration.status === "reviewing") {
       const verdict = getReviewVerdict(iteration);
       if (verdict === "approved") {
-        await handleReviewComplete(workflowId, true, readFileSync(iteration.reviewFindingsPath, "utf-8"));
+        await handleReviewComplete(
+          workflowId,
+          true,
+          readFileSync(iteration.reviewFindingsPath, "utf-8"),
+        );
         return loadWorkflowOrThrow(workflowId).workflow;
       }
       if (verdict === "changes_requested") {
-        await handleReviewComplete(workflowId, false, readFileSync(iteration.reviewFindingsPath, "utf-8"));
+        await handleReviewComplete(
+          workflowId,
+          false,
+          readFileSync(iteration.reviewFindingsPath, "utf-8"),
+        );
         return loadWorkflowOrThrow(workflowId).workflow;
       }
       if (workflow.dispatchStatus === "pending" || ownerSession.activity === "ready") {
@@ -1481,7 +1775,11 @@ Issue: ${issueId}
       return workflow;
     }
 
-    if (desiredStage === "architect" && desiredIteration === iteration.number && iteration.status === "planning") {
+    if (
+      desiredStage === "architect" &&
+      desiredIteration === iteration.number &&
+      iteration.status === "planning"
+    ) {
       if (workflow.dispatchStatus === "pending" || !architectArtifactsReady(iteration)) {
         await dispatchArchitectForIteration(workflow, project, iteration);
         return loadWorkflowOrThrow(workflowId).workflow;
@@ -1493,7 +1791,11 @@ Issue: ${issueId}
       return loadWorkflowOrThrow(workflowId).workflow;
     }
 
-    if (desiredStage === "builder" && desiredIteration === iteration.number && iteration.status === "building") {
+    if (
+      desiredStage === "builder" &&
+      desiredIteration === iteration.number &&
+      iteration.status === "building"
+    ) {
       if (builderArtifactsReadyForAdvance(workflow, iteration, desiredBuilderIteration)) {
         const maybeNext = await spawnNextBuilder(workflowId);
         if (maybeNext) {
@@ -1504,14 +1806,12 @@ Issue: ${issueId}
 
       if (workflow.dispatchStatus === "pending" || ownerSession.activity === "ready") {
         if (desiredBuilderIteration > 0) {
-          workflow.currentBuilderIteration = Math.max(workflow.currentBuilderIteration, desiredBuilderIteration);
-          persistWorkflow(project.path, workflow);
-          await dispatchBuilderForIteration(
-            workflow,
-            project,
-            iteration,
+          workflow.currentBuilderIteration = Math.max(
+            workflow.currentBuilderIteration,
             desiredBuilderIteration,
           );
+          persistWorkflow(project.path, workflow);
+          await dispatchBuilderForIteration(workflow, project, iteration, desiredBuilderIteration);
         } else {
           await spawnNextBuilder(workflowId);
         }
@@ -1537,10 +1837,7 @@ Issue: ${issueId}
     const project = config.projects[projectId];
     if (!project) return [];
 
-    const workflowsDir = join(
-      getProjectBaseDir(config.configPath, project.path),
-      "workflows"
-    );
+    const workflowsDir = join(getProjectBaseDir(config.configPath, project.path), "workflows");
 
     if (!existsSync(workflowsDir)) return [];
 

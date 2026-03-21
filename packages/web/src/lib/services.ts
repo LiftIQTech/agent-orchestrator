@@ -272,8 +272,7 @@ export async function pollBacklog(): Promise<void> {
                 issue.id,
                 {
                   labels: ["agent:in-progress"],
-                  removeLabels: ["agent:backlog"],
-                  comment: "Claimed by agent orchestrator — architect workflow started.",
+                  removeLabels: ["agent:backlog", "agent:pending-merge"],
                 },
                 project,
               );

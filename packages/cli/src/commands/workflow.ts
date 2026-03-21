@@ -75,6 +75,9 @@ function printWorkflowDetails(workflow: WorkflowState): void {
   console.log(`  Project:    ${workflow.projectId}`);
   console.log(`  Branch:     ${workflow.branch}`);
   console.log(`  Base:       ${workflow.baseBranch}`);
+  if (workflow.baseBranchSource) {
+    console.log(`  Base Src:   ${workflow.baseBranchSource}`);
+  }
   console.log(`  Status:     ${formatWorkflowStatus(workflow.status)}`);
   console.log(`  Iteration:  ${workflow.currentIteration}/${workflow.maxIterations}`);
   console.log(`  Builders:   ${workflow.currentBuilderIteration}/${workflow.maxBuilderIterations}`);
@@ -91,9 +94,7 @@ function printWorkflowDetails(workflow: WorkflowState): void {
 }
 
 export function registerWorkflow(program: Command): void {
-  const workflow = program
-    .command("workflow")
-    .description("Manage architect-delivery workflows");
+  const workflow = program.command("workflow").description("Manage architect-delivery workflows");
 
   workflow
     .command("start")
@@ -118,9 +119,7 @@ export function registerWorkflow(program: Command): void {
       }
 
       if (!project.workflow?.enabled) {
-        console.error(
-          chalk.red(`Workflows not enabled for project: ${projectId}`),
-        );
+        console.error(chalk.red(`Workflows not enabled for project: ${projectId}`));
         console.log();
         console.log("To enable, add to your config:");
         console.log(chalk.gray(`  projects.${projectId}.workflow.enabled: true`));
@@ -128,6 +127,8 @@ export function registerWorkflow(program: Command): void {
       }
 
       try {
+        console.log(chalk.dim(`Using config: ${config.configPath}`));
+        console.log(chalk.dim(`Configured default base: ${project.defaultBranch}`));
         await runWorkflowPreflight(config, projectId);
         await ensureLifecycleWorker(config, projectId);
 
@@ -135,17 +136,25 @@ export function registerWorkflow(program: Command): void {
         const wm = createWorkflowManager({ config, registry, sessionManager });
 
         const spinner = ora("Starting workflow").start();
-        
+
         const workflow = await wm.startWorkflow(projectId, issueId, opts.baseBranch);
-        
+
         spinner.succeed(`Workflow started: ${workflow.id}`);
-        
+
         printWorkflowDetails(workflow);
 
         console.log();
-        console.log(chalk.green("Architect stage started in workflow owner session. Check PLAN.md for task creation."));
+        console.log(
+          chalk.green(
+            "Architect stage started in workflow owner session. Check PLAN.md for task creation.",
+          ),
+        );
       } catch (err) {
-        console.error(chalk.red(`Failed to start workflow: ${err instanceof Error ? err.message : String(err)}`));
+        console.error(
+          chalk.red(
+            `Failed to start workflow: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
         process.exit(1);
       }
     });
@@ -170,7 +179,7 @@ export function registerWorkflow(program: Command): void {
       if (issueId) {
         const workflowId = `wf-${issueId}`;
         const workflow = wm.getWorkflow(projectId, workflowId);
-        
+
         if (!workflow) {
           console.error(chalk.red(`No workflow found for issue: ${issueId}`));
           process.exit(1);
@@ -179,7 +188,7 @@ export function registerWorkflow(program: Command): void {
         printWorkflowDetails(workflow);
       } else {
         const workflows = wm.listWorkflows(projectId);
-        
+
         if (workflows.length === 0) {
           console.log(chalk.gray("No workflows found for this project."));
           return;
@@ -232,12 +241,14 @@ export function registerWorkflow(program: Command): void {
       }
 
       const spinner = ora("Killing workflow sessions").start();
-      
+
       try {
         await wm.killWorkflow(workflowId);
         spinner.succeed(`Workflow ${workflowId} killed`);
       } catch (err) {
-        spinner.fail(`Failed to kill workflow: ${err instanceof Error ? err.message : String(err)}`);
+        spinner.fail(
+          `Failed to kill workflow: ${err instanceof Error ? err.message : String(err)}`,
+        );
         process.exit(1);
       }
     });
@@ -319,7 +330,11 @@ export function registerWorkflow(program: Command): void {
 
         printWorkflowDetails(workflow);
       } catch (err) {
-        console.error(chalk.red(`Failed to resume workflow: ${err instanceof Error ? err.message : String(err)}`));
+        console.error(
+          chalk.red(
+            `Failed to resume workflow: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
         process.exit(1);
       }
     });

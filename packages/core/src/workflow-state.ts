@@ -9,12 +9,8 @@
 
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import type {
-  OrchestratorConfig,
-  ProjectConfig,
-  WorkflowState,
-  IterationState,
-} from "./types.js";
+import type { OrchestratorConfig, ProjectConfig, WorkflowState, IterationState } from "./types.js";
+import { loadConfig } from "./config.js";
 import { getProjectBaseDir } from "./paths.js";
 import { safeJsonParse } from "./utils/validation.js";
 
@@ -30,7 +26,7 @@ export function getIterationsBaseDir(
   configPath: string,
   projectPath: string,
   issueId: string,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   return join(getProjectRootDir(configPath, projectPath, issueId, worktreePath), "iterations");
 }
@@ -39,7 +35,7 @@ export function getProjectRootDir(
   configPath: string,
   projectPath: string,
   issueId: string,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   if (worktreePath && worktreePath.length > 0) {
     return join(worktreePath, ".architect-delivery", "projects", `issue-${issueId}`);
@@ -52,7 +48,7 @@ export function getIterationDir(
   projectPath: string,
   issueId: string,
   iteration: number,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   return join(
     getIterationsBaseDir(configPath, projectPath, issueId, worktreePath),
@@ -63,7 +59,7 @@ export function getIterationDir(
 export function getWorkflowStatePath(
   configPath: string,
   projectPath: string,
-  workflowId: string
+  workflowId: string,
 ): string {
   return join(getWorkflowsDir(configPath, projectPath), `${workflowId}.json`);
 }
@@ -73,9 +69,12 @@ export function getPlanPath(
   projectPath: string,
   issueId: string,
   iteration: number,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
-  return join(getIterationDir(configPath, projectPath, issueId, iteration, worktreePath), "PLAN.md");
+  return join(
+    getIterationDir(configPath, projectPath, issueId, iteration, worktreePath),
+    "PLAN.md",
+  );
 }
 
 export function getProgressPath(
@@ -83,9 +82,12 @@ export function getProgressPath(
   projectPath: string,
   issueId: string,
   iteration: number,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
-  return join(getIterationDir(configPath, projectPath, issueId, iteration, worktreePath), "PROGRESS.md");
+  return join(
+    getIterationDir(configPath, projectPath, issueId, iteration, worktreePath),
+    "PROGRESS.md",
+  );
 }
 
 export function getOrchestratorAnalysisPath(
@@ -93,7 +95,7 @@ export function getOrchestratorAnalysisPath(
   projectPath: string,
   issueId: string,
   iteration: number,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   return join(
     getIterationDir(configPath, projectPath, issueId, iteration, worktreePath),
@@ -106,7 +108,7 @@ export function getReviewFindingsPath(
   projectPath: string,
   issueId: string,
   iteration: number,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   return join(
     getIterationDir(configPath, projectPath, issueId, iteration, worktreePath),
@@ -118,7 +120,7 @@ export function getRequirementsPath(
   configPath: string,
   projectPath: string,
   issueId: string,
-  worktreePath?: string
+  worktreePath?: string,
 ): string {
   return join(getProjectRootDir(configPath, projectPath, issueId, worktreePath), "requirements.md");
 }
@@ -137,7 +139,8 @@ export function createWorkflowState(
   projectId: string,
   issueId: string,
   branch: string,
-  baseBranch?: string
+  baseBranch?: string,
+  baseBranchSource: "explicit" | "issue-linked" | "project-default" = "project-default",
 ): WorkflowState {
   const workflowId = generateWorkflowId(issueId);
   const maxIterations = project.workflow?.iterations?.maxIterations ?? 30;
@@ -161,6 +164,7 @@ export function createWorkflowState(
     maxBuilderIterations,
     branch,
     baseBranch: baseBranch ?? project.defaultBranch,
+    baseBranchSource,
     worktreePath: "",
     ownerSessionId: "",
     createdAt: now,
@@ -188,7 +192,7 @@ export function createWorkflowState(
 export function loadWorkflowState(
   configPath: string,
   projectPath: string,
-  workflowId: string
+  workflowId: string,
 ): WorkflowState | null {
   const path = getWorkflowStatePath(configPath, projectPath, workflowId);
   if (!existsSync(path)) return null;
@@ -197,23 +201,46 @@ export function loadWorkflowState(
     const raw = readFileSync(path, "utf-8");
     const state = safeJsonParse<WorkflowState>(raw);
     if (!state) return null;
+    const config = loadConfig(configPath);
+    const project = config.projects[state.projectId];
+    const configuredMaxIterations = project?.workflow?.iterations?.maxIterations ?? 30;
+    const configuredMaxBuilderIterations = project?.workflow?.builders?.maxIterations ?? 5;
+    if (!state.maxIterations || state.maxIterations < configuredMaxIterations) {
+      state.maxIterations = configuredMaxIterations;
+    }
+    if (
+      !state.maxBuilderIterations ||
+      state.maxBuilderIterations < configuredMaxBuilderIterations
+    ) {
+      state.maxBuilderIterations = configuredMaxBuilderIterations;
+    }
     if (!state.baseBranch || state.baseBranch.length === 0) {
       state.baseBranch = state.branch;
+    }
+    if (!state.baseBranchSource) {
+      state.baseBranchSource = "project-default";
     }
     if (!state.ownerSessionId) {
       state.ownerSessionId = "";
     }
     if (!state.desiredStage) {
-      state.desiredStage = state.status === "reviewing" ? "reviewer" : state.status === "building" ? "builder" : "architect";
+      state.desiredStage =
+        state.status === "reviewing"
+          ? "reviewer"
+          : state.status === "building"
+            ? "builder"
+            : "architect";
     }
     if (!state.desiredIteration || state.desiredIteration < 1) {
       state.desiredIteration = state.currentIteration > 0 ? state.currentIteration : 1;
     }
     if (state.desiredBuilderIteration === undefined || state.desiredBuilderIteration < 0) {
-      state.desiredBuilderIteration = state.currentBuilderIteration > 0 ? state.currentBuilderIteration : 0;
+      state.desiredBuilderIteration =
+        state.currentBuilderIteration > 0 ? state.currentBuilderIteration : 0;
     }
     if (!state.dispatchStatus) {
-      state.dispatchStatus = state.status === "completed" || state.status === "failed" ? "completed" : "pending";
+      state.dispatchStatus =
+        state.status === "completed" || state.status === "failed" ? "completed" : "pending";
     }
     if (!state.dispatchStartedAt) {
       state.dispatchStartedAt = state.updatedAt ?? new Date().toISOString();
@@ -223,7 +250,8 @@ export function loadWorkflowState(
     }
     state.iterations = state.iterations.map((iteration) => {
       const iterNum = iteration.number;
-      const iterationDir = iteration.iterationDir ?? getIterationDir(configPath, projectPath, state.issueId, iterNum);
+      const iterationDir =
+        iteration.iterationDir ?? getIterationDir(configPath, projectPath, state.issueId, iterNum);
       return {
         ...iteration,
         iterationDir,
@@ -244,11 +272,11 @@ export function loadWorkflowState(
 export function saveWorkflowState(
   configPath: string,
   projectPath: string,
-  state: WorkflowState
+  state: WorkflowState,
 ): void {
   const path = getWorkflowStatePath(configPath, projectPath, state.id);
   const dir = dirname(path);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -259,7 +287,7 @@ export function saveWorkflowState(
 
 export function findWorkflowByIssue(
   config: OrchestratorConfig,
-  issueId: string
+  issueId: string,
 ): { workflow: WorkflowState; project: ProjectConfig; projectId: string } | null {
   for (const [projectId, project] of Object.entries(config.projects)) {
     const workflowId = generateWorkflowId(issueId);
@@ -279,7 +307,7 @@ export function startNewIteration(
   configPath: string,
   projectPath: string,
   workflow: WorkflowState,
-  worktreePath?: string
+  worktreePath?: string,
 ): IterationState {
   const iterationNum = workflow.currentIteration + 1;
   const now = new Date().toISOString();
@@ -288,9 +316,21 @@ export function startNewIteration(
     number: iterationNum,
     status: "planning",
     startedAt: now,
-    iterationDir: getIterationDir(configPath, projectPath, workflow.issueId, iterationNum, worktreePath),
+    iterationDir: getIterationDir(
+      configPath,
+      projectPath,
+      workflow.issueId,
+      iterationNum,
+      worktreePath,
+    ),
     planPath: getPlanPath(configPath, projectPath, workflow.issueId, iterationNum, worktreePath),
-    progressPath: getProgressPath(configPath, projectPath, workflow.issueId, iterationNum, worktreePath),
+    progressPath: getProgressPath(
+      configPath,
+      projectPath,
+      workflow.issueId,
+      iterationNum,
+      worktreePath,
+    ),
     orchestratorAnalysisPath: getOrchestratorAnalysisPath(
       configPath,
       projectPath,

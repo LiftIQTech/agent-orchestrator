@@ -1,0 +1,14 @@
+dataDir: ~/.agent-orchestrator
+worktreeDir: ~/.worktrees
+port: 3000
+defaults:
+  runtime: tmux
+  agent: opencode
+  workspace: clone
+  notifiers:
+    - desktop
+projects:
+  lift-iq:
+    repo: LiftIQTech/lift-iq
+    path: ~/repos/lift-iq
+    defaultBranch: main

@@ -65,6 +65,15 @@ async function execCli(
   }
 }
 
+function isRateLimitError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("API rate limit already exceeded") ||
+    message.includes("secondary rate limit") ||
+    message.includes("rate limit exceeded")
+  );
+}
+
 async function gh(args: string[]): Promise<string> {
   return execCli("gh", args);
 }
@@ -279,8 +288,27 @@ function createGitHubSCM(): SCM {
     ): Promise<PRInfo> {
       const [owner, repo] = parseProjectRepo(project.repo);
 
+      const resolveExisting = () =>
+        resolveExistingPRForHeadBase(project.repo, input.branch, input.baseBranch);
+
       // Ensure branch is on remote before PR creation.
-      await git(["push", "-u", "origin", input.branch], project.path);
+      try {
+        await git(["push", "-u", "origin", input.branch], project.path);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          message.includes("failed to push some refs") ||
+          message.includes("cannot lock ref") ||
+          message.includes("non-fast-forward") ||
+          message.includes("fetch first")
+        ) {
+          const existing = await resolveExisting();
+          if (existing) {
+            return existing;
+          }
+        }
+        throw err;
+      }
 
       const args = [
         "pr",
@@ -308,11 +336,7 @@ function createGitHubSCM(): SCM {
           message.includes("already exists") ||
           message.includes("A pull request already exists")
         ) {
-          const existing = await resolveExistingPRForHeadBase(
-            project.repo,
-            input.branch,
-            input.baseBranch,
-          );
+          const existing = await resolveExisting();
           if (existing) {
             return existing;
           }
@@ -409,7 +433,10 @@ function createGitHubSCM(): SCM {
         if (prs.length === 0) return null;
 
         return prInfoFromView(prs[0], project.repo);
-      } catch {
+      } catch (err) {
+        if (isRateLimitError(err)) {
+          throw err;
+        }
         return null;
       }
     },

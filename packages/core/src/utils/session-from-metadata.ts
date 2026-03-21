@@ -18,7 +18,7 @@ export function sessionFromMetadata(
 ): Session {
   return {
     id: sessionId,
-    projectId: meta["project"] ?? "",
+    projectId: meta["project"] ?? meta["projectId"] ?? "",
     status: options.status ?? validateStatus(meta["status"]),
     activity: options.activity ?? null,
     branch: meta["branch"] || null,

@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, lstatSync, symlinkSync, rmSync, mkdirSync, readdirSync, cpSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  symlinkSync,
+  rmSync,
+  mkdirSync,
+  readdirSync,
+  cpSync,
+} from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -27,6 +35,14 @@ export const manifest = {
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd });
   return stdout.trimEnd();
+}
+
+async function pruneWorktrees(repoPath: string): Promise<void> {
+  try {
+    await git(repoPath, "worktree", "prune", "--verbose");
+  } catch {
+    // Best-effort preflight only.
+  }
 }
 
 async function getExistingWorktreePath(repoPath: string, branch: string): Promise<string | null> {
@@ -134,6 +150,7 @@ export function create(config?: Record<string, unknown>): Workspace {
       let architectDeliveryBackupPath: string | null = null;
 
       mkdirSync(projectWorktreeDir, { recursive: true });
+      await pruneWorktrees(repoPath);
 
       // Fetch latest from remote
       try {
@@ -445,6 +462,19 @@ export function create(config?: Record<string, unknown>): Workspace {
         await git(repoPath, "worktree", "add", workspacePath, cfg.branch);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        const reusableCurrentPath = await reuseWorkspacePathIfAlreadyValid(
+          workspacePath,
+          cfg.branch,
+          cfg.sessionId,
+          cfg.projectId,
+        );
+        if (reusableCurrentPath) {
+          if (architectDeliveryBackupPath && existsSync(architectDeliveryBackupPath)) {
+            rmSync(architectDeliveryBackupPath, { recursive: true, force: true });
+            architectDeliveryBackupPath = null;
+          }
+          return reusableCurrentPath;
+        }
         const reused = await reuseRestoredWorktree(message);
         if (reused) return reused;
         // Branch might not exist locally — try from origin
@@ -453,6 +483,19 @@ export function create(config?: Record<string, unknown>): Workspace {
           await git(repoPath, "worktree", "add", "-b", cfg.branch, workspacePath, remoteBranch);
         } catch (remoteErr) {
           const remoteMessage = remoteErr instanceof Error ? remoteErr.message : String(remoteErr);
+          const reusableRemotePath = await reuseWorkspacePathIfAlreadyValid(
+            workspacePath,
+            cfg.branch,
+            cfg.sessionId,
+            cfg.projectId,
+          );
+          if (reusableRemotePath) {
+            if (architectDeliveryBackupPath && existsSync(architectDeliveryBackupPath)) {
+              rmSync(architectDeliveryBackupPath, { recursive: true, force: true });
+              architectDeliveryBackupPath = null;
+            }
+            return reusableRemotePath;
+          }
           const remoteReused = await reuseRestoredWorktree(remoteMessage);
           if (remoteReused) return remoteReused;
           // Last resort: create from default branch

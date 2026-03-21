@@ -48,6 +48,7 @@ import {
 const WORKFLOW_SENTINEL_PREFIX = "__AO_STAGE_DONE__";
 const WORKFLOW_STAGE_IDLE_TIMEOUT_MS = 10 * 60_000;
 const WORKFLOW_STAGE_TIMEOUT_MS = 60 * 60_000;
+const WORKFLOW_FOLLOW_UP_RETRY_DELAY_MS = 10 * 60_000;
 
 function parseWorkflowStageExitCode(output: string): number | null {
   const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -124,6 +125,17 @@ function hasWorkflowStageGoneIdle(lastActivityAt?: string): boolean {
   const last = Date.parse(lastActivityAt);
   if (Number.isNaN(last)) return false;
   return Date.now() - last >= WORKFLOW_STAGE_IDLE_TIMEOUT_MS;
+}
+
+function computeWorkflowFollowUpRetryAt(now = Date.now()): string {
+  return new Date(now + WORKFLOW_FOLLOW_UP_RETRY_DELAY_MS).toISOString();
+}
+
+function shouldDeferWorkflowFollowUp(workflow: { followUpRetryAt?: string }, now = Date.now()): boolean {
+  if (!workflow.followUpRetryAt) return false;
+  const retryAt = Date.parse(workflow.followUpRetryAt);
+  if (Number.isNaN(retryAt)) return false;
+  return retryAt > now;
 }
 
 function isWorkflowStageReadyForAdvance(session?: Session): boolean {
@@ -645,6 +657,16 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     return a.every((value, index) => value === b[index]);
   }
 
+  function isScmRateLimitError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    return (
+      message.includes("API rate limit already exceeded") ||
+      message.includes("secondary rate limit") ||
+      message.includes("rate limit exceeded") ||
+      message.includes("SCM rate limited")
+    );
+  }
+
   async function maybeDispatchReviewBacklog(
     session: Session,
     oldStatus: SessionStatus,
@@ -925,8 +947,19 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       
       for (const listedWorkflow of workflows) {
         let workflow = listedWorkflow;
-        // Skip failed workflows; completed workflows are still monitored for PR follow-up.
-        if (workflow.status === "failed") continue;
+        // Skip terminally failed workflows only when there is no actionable iteration state left.
+        if (
+          workflow.status === "failed" &&
+          !workflow.iterations.some(
+            (iteration) =>
+              iteration.status === "planning" ||
+              iteration.status === "building" ||
+              iteration.status === "reviewing" ||
+              iteration.status === "changes_requested",
+          )
+        ) {
+          continue;
+        }
 
         // Deterministic guard: workflow sessions must stay on workflow.branch
         const workflowSessions = sessions.filter((s) => s.metadata["workflowId"] === workflow.id);
@@ -950,7 +983,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         let iteration = workflow.iterations[workflow.currentIteration - 1];
         if (!iteration) continue;
 
-        if (workflow.status === "completed" && project.scm && workflow.artifacts.prs.length > 0) {
+        if (
+          workflow.status === "completed" &&
+          project.scm &&
+          workflow.artifacts.prs.length > 0 &&
+          !shouldDeferWorkflowFollowUp(workflow)
+        ) {
           const scm = registry.get<SCM>("scm", project.scm.plugin);
           if (!scm?.resolvePR) {
             continue;
@@ -958,6 +996,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
           try {
             const pr = await scm.resolvePR(workflow.artifacts.prs.at(-1)!, project);
+            if (workflow.followUpRetryAt) {
+              delete workflow.followUpRetryAt;
+              saveWorkflowState(config.configPath, project.path, workflow);
+            }
             const syntheticSession: Session = {
               id: `${project.sessionPrefix}-workflow-${workflow.issueId}`,
               projectId,
@@ -1041,6 +1083,14 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
               }
             }
           } catch (err) {
+            if (isScmRateLimitError(err)) {
+              workflow.followUpRetryAt = computeWorkflowFollowUpRetryAt();
+              saveWorkflowState(config.configPath, project.path, workflow);
+              console.warn(
+                `[ao lifecycle] SCM rate limited while evaluating completed workflow follow-up for ${workflow.id}; deferring retry until ${workflow.followUpRetryAt}`,
+              );
+              continue;
+            }
             console.error(`[ao lifecycle] Failed to evaluate completed workflow follow-up for ${workflow.id}:`, err);
           }
         }
@@ -1104,6 +1154,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
             iteration = workflow.iterations[workflow.currentIteration - 1];
             if (!iteration) continue;
           } catch (err) {
+            if (isScmRateLimitError(err)) {
+              console.warn(`[ao lifecycle] SCM rate limited while resuming ${workflow.id}; deferring retry`);
+              continue;
+            }
             console.error(`[ao lifecycle] Failed to resume workflow ${workflow.id}:`, err);
           }
         }
