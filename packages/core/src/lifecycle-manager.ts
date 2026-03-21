@@ -297,11 +297,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         const detectedPR = await scm.detectPR(session, project);
         if (detectedPR) {
           session.pr = detectedPR;
+          session.branch = detectedPR.branch;
           // Persist PR URL so subsequent polls don't need to re-query.
           // Don't write status here — step 4 below will determine the
           // correct status (merged, ci_failed, etc.) on this same cycle.
           const sessionsDir = getSessionsDir(config.configPath, project.path);
-          updateMetadata(sessionsDir, session.id, { pr: detectedPR.url });
+          updateMetadata(sessionsDir, session.id, { pr: detectedPR.url, branch: detectedPR.branch });
         }
       } catch {
         // SCM detection failed — will retry next poll

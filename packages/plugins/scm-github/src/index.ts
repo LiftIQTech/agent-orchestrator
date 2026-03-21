@@ -83,6 +83,21 @@ async function git(args: string[], cwd: string): Promise<string> {
   return execCli("git", args, cwd);
 }
 
+async function resolveDetectBranch(session: Session): Promise<string | null> {
+  if (!session.branch && !session.workspacePath) return null;
+
+  if (session.workspacePath) {
+    try {
+      const currentBranch = await git(["branch", "--show-current"], session.workspacePath);
+      if (currentBranch) return currentBranch;
+    } catch {
+      // Fall back to session metadata branch when workspace inspection fails.
+    }
+  }
+
+  return session.branch;
+}
+
 function parseProjectRepo(projectRepo: string): [string, string] {
   const parts = projectRepo.split("/");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -510,7 +525,8 @@ function createGitHubSCM(): SCM {
     },
 
     async detectPR(session: Session, project: ProjectConfig): Promise<PRInfo | null> {
-      if (!session.branch) return null;
+      const detectBranch = await resolveDetectBranch(session);
+      if (!detectBranch) return null;
       parseProjectRepo(project.repo);
       try {
         const raw = await gh([
@@ -519,7 +535,7 @@ function createGitHubSCM(): SCM {
           "--repo",
           project.repo,
           "--head",
-          session.branch,
+          detectBranch,
           "--json",
           "number,url,title,headRefName,baseRefName,isDraft",
           "--limit",

@@ -387,6 +387,7 @@ describe("scm-github plugin", () => {
 
   describe("detectPR", () => {
     it("returns PRInfo when a PR exists", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "feat/my-feature\n" });
       mockGh([
         {
           number: 42,
@@ -412,18 +413,72 @@ describe("scm-github plugin", () => {
     });
 
     it("returns null when no PR found", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "feat/my-feature\n" });
       mockGh([]);
       const result = await scm.detectPR(makeSession(), project);
       expect(result).toBeNull();
     });
 
+    it("prefers current git branch from workspace when metadata branch is stale", async () => {
+      ghMock
+        .mockResolvedValueOnce({ stdout: "feat/actual-branch\n" })
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([
+            {
+              number: 42,
+              url: "https://github.com/acme/repo/pull/42",
+              title: "feat: add feature",
+              headRefName: "feat/actual-branch",
+              baseRefName: "main",
+              isDraft: false,
+            },
+          ]),
+        });
+
+      const result = await scm.detectPR(
+        makeSession({ branch: "feat/stale-branch", workspacePath: "/tmp/repo" }),
+        project,
+      );
+
+      expect(result?.branch).toBe("feat/actual-branch");
+      expect(ghMock).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["branch", "--show-current"],
+        expect.objectContaining({ cwd: "/tmp/repo" }),
+      );
+      expect(ghMock).toHaveBeenNthCalledWith(
+        2,
+        "gh",
+        [
+          "pr",
+          "list",
+          "--repo",
+          "acme/repo",
+          "--head",
+          "feat/actual-branch",
+          "--json",
+          "number,url,title,headRefName,baseRefName,isDraft",
+          "--limit",
+          "1",
+        ],
+        expect.any(Object),
+      );
+    });
+
     it("returns null when session has no branch", async () => {
       const result = await scm.detectPR(makeSession({ branch: null }), project);
       expect(result).toBeNull();
-      expect(ghMock).not.toHaveBeenCalled();
+      expect(ghMock).toHaveBeenCalledOnce();
+      expect(ghMock).toHaveBeenCalledWith(
+        "git",
+        ["branch", "--show-current"],
+        expect.objectContaining({ cwd: "/tmp/repo" }),
+      );
     });
 
     it("returns null on gh CLI error", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "feat/my-feature\n" });
       mockGhError("gh: not found");
       const result = await scm.detectPR(makeSession(), project);
       expect(result).toBeNull();
@@ -440,6 +495,7 @@ describe("scm-github plugin", () => {
     });
 
     it("detects draft PRs", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "feat/my-feature\n" });
       mockGh([
         {
           number: 99,

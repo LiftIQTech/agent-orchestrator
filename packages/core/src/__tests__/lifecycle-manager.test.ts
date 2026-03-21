@@ -826,6 +826,64 @@ describe("check (single session)", () => {
     expect(lm.getStates().get("app-orchestrator")).toBe("working");
   });
 
+  it("persists detected PR and canonical branch when metadata branch is stale", async () => {
+    const detectedPr = makePR({ branch: "feat/actual-branch" });
+    const mockSCM: SCM = {
+      name: "mock-scm",
+      detectPR: vi.fn().mockResolvedValue(detectedPr),
+      getPRState: vi.fn().mockResolvedValue("open"),
+      mergePR: vi.fn(),
+      closePR: vi.fn(),
+      getCIChecks: vi.fn(),
+      getCISummary: vi.fn().mockResolvedValue("passing"),
+      getReviews: vi.fn(),
+      getReviewDecision: vi.fn().mockResolvedValue("none"),
+      getPendingComments: vi.fn(),
+      getAutomatedComments: vi.fn(),
+      getMergeability: vi.fn().mockResolvedValue({ mergeable: false, reason: undefined }),
+    };
+
+    const registryWithSCM: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "scm") return mockSCM;
+        return null;
+      }),
+    };
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: "feat/stale-branch",
+      status: "working",
+      project: "my-app",
+    });
+
+    const realSessionManager = createSessionManager({
+      config,
+      registry: registryWithSCM,
+    });
+    const session = await realSessionManager.get("app-1");
+
+    expect(session).not.toBeNull();
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithSCM,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    const raw = readMetadataRaw(sessionsDir, "app-1");
+    expect(mockSCM.detectPR).toHaveBeenCalled();
+    expect(raw?.["pr"]).toBe(detectedPr.url);
+    expect(raw?.["branch"]).toBe("feat/actual-branch");
+    expect(lm.getStates().get("app-1")).toBe("pr_open");
+  });
+
   it("detects merged PR", async () => {
     const mockSCM: SCM = {
       name: "mock-scm",
