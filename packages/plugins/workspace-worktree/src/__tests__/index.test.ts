@@ -165,6 +165,12 @@ describe("workspace.create()", () => {
       ],
       { cwd: "/repo/path" },
     );
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      "git",
+      ["config", "branch.feat/TEST-1.gh-merge-base", "main"],
+      { cwd: "/mock-home/.worktrees/myproject/session-1" },
+    );
   });
 
   it("creates the project worktree directory", async () => {
@@ -185,6 +191,18 @@ describe("workspace.create()", () => {
 
     mockGitError("Could not resolve host"); // fetch fails
     mockGitSuccess(""); // worktree add succeeds
+
+    const info = await ws.create(makeCreateConfig());
+
+    expect(info.path).toBe("/mock-home/.worktrees/myproject/session-1");
+  });
+
+  it("continues when configuring gh merge base fails", async () => {
+    const ws = create();
+
+    mockGitSuccess(""); // fetch
+    mockGitSuccess(""); // worktree add
+    mockGitError("config failed"); // branch gh-merge-base config
 
     const info = await ws.create(makeCreateConfig());
 

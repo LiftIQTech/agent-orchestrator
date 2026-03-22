@@ -103,6 +103,12 @@ export function create(config?: Record<string, unknown>): Workspace {
         }
       }
 
+      try {
+        await git(worktreePath, "config", `branch.${cfg.branch}.gh-merge-base`, cfg.project.defaultBranch);
+      } catch {
+        // Best effort: GitHub CLI falls back to the repo default branch when unset.
+      }
+
       return {
         path: worktreePath,
         branch: cfg.branch,
