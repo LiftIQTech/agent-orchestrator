@@ -11,7 +11,7 @@
  * Reference: scripts/claude-ao-session, scripts/send-to-session
  */
 
-import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
+import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync, utimesSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -1150,6 +1150,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       if (Object.keys(session.metadata || {}).length > 0) {
         updateMetadata(sessionsDir, sessionId, session.metadata);
       }
+
     } catch (err) {
       // Clean up runtime and workspace on post-launch failure
       try {
@@ -1443,6 +1444,18 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         /* best effort */
       }
       throw err;
+    }
+
+    if (plugins.agent.promptDelivery === "post-launch" && systemPromptFile) {
+      try {
+        const orchestratorPrompt = readFileSync(systemPromptFile, "utf-8");
+        if (orchestratorPrompt) {
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+          await plugins.runtime.sendMessage(handle, orchestratorPrompt);
+        }
+      } catch {
+        // Non-fatal: orchestrator is running but did not receive its initial prompt.
+      }
     }
 
     return session;

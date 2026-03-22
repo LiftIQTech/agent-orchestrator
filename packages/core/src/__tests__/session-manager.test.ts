@@ -3806,6 +3806,38 @@ describe("spawnOrchestrator", () => {
     expect(readFileSync(promptFile, "utf-8")).toBe("You are the orchestrator.");
   });
 
+  it("sends orchestrator system prompt post-launch for post-launch agents", async () => {
+    vi.useFakeTimers();
+    const postLaunchAgent = {
+      ...mockAgent,
+      promptDelivery: "post-launch" as const,
+    };
+    const registryWithPostLaunch: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return postLaunchAgent;
+        if (slot === "workspace") return mockWorkspace;
+        return null;
+      }),
+    };
+
+    const sm = createSessionManager({ config, registry: registryWithPostLaunch });
+    const spawnPromise = sm.spawnOrchestrator({
+      projectId: "my-app",
+      systemPrompt: "You are the orchestrator.",
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await spawnPromise;
+
+    expect(mockRuntime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.any(String) }),
+      "You are the orchestrator.",
+    );
+    vi.useRealTimers();
+  });
+
   it("throws for unknown project", async () => {
     const sm = createSessionManager({ config, registry: mockRegistry });
 
