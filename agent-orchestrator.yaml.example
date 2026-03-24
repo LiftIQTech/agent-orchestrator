@@ -67,11 +67,11 @@ projects:
     # orchestrator:
     #   agent: claude-code
     #   agentConfig:
-    #     model: claude-sonnet-4-5
+    #     model: alibaba-intl/glm-5
     # worker:
     #   agent: codex
     #   agentConfig:
-    #     model: gpt-5-codex
+    #     model: alibaba-intl/glm-5
 
     # Inline rules included in every agent prompt for this project
     # agentRules: |
@@ -80,6 +80,14 @@ projects:
 
     # Path to a rules file (relative to project path)
     # agentRulesFile: .agent-rules.md
+
+    # Extra rules included only in worker prompts for this project
+    # workerRules: |
+    #   Read local conventions before coding.
+    #   Run relevant validation before finishing.
+
+    # Path to a worker-only rules file (relative to project path)
+    # workerRulesFile: .ao/worker-quality-rules.md
 
     # Rules for the orchestrator agent (reserved for future use)
     # orchestratorRules: |

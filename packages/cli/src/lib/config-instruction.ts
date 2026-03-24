@@ -48,12 +48,17 @@ projects:
     agentConfig:
       permissions: auto       # auto | manual — agent permission mode
       model: claude-sonnet-4-20250514
+      # orchestratorModel: alibaba-intl/glm-5
 
     # ── Agent rules (optional) ────────────────────────────────────
     agentRules: |             # Inline rules passed to every agent prompt
       Always run tests before committing.
       Use conventional commits.
     agentRulesFile: .ao-rules # Or point to a file (relative to project path)
+    workerRules: |            # Extra rules passed only to worker sessions
+      Read local conventions before coding.
+      Run relevant validation before finishing.
+    workerRulesFile: .ao/worker-quality-rules.md
     orchestratorRules: |      # Rules for the orchestrator agent
 
     # ── Orchestrator session strategy (optional) ──────────────────
@@ -85,6 +90,14 @@ projects:
       maxDepth: 3             # Max recursion depth
       model: claude-sonnet-4-20250514
       requireApproval: true   # Require human approval before executing
+
+    # Optional role-specific model overrides
+    # orchestrator:
+    #   agentConfig:
+    #     model: alibaba-intl/glm-5
+    # worker:
+    #   agentConfig:
+    #     model: alibaba-intl/glm-5
 
     # ── Per-project reaction overrides (optional) ─────────────────
     # reactions:

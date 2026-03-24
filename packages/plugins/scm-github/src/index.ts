@@ -699,18 +699,18 @@ function createGitHubSCM(): SCM {
       try {
         checks = await this.getCIChecks(pr);
       } catch {
-        // Before fail-closing, check if the PR is merged/closed —
-        // GitHub may not return check data for those, and reporting
-        // "failing" for a merged PR is wrong.
+        // If GitHub cannot provide check data, preserve safety without
+        // misclassifying the PR as actively failing. Treat it as pending
+        // (unknown) for open PRs so lifecycle logic avoids waking workers
+        // with false CI-failure prompts, while merge readiness still stays
+        // blocked until checks can be observed.
         try {
           const state = await this.getPRState(pr);
           if (state === "merged" || state === "closed") return "none";
         } catch {
-          // Can't determine state either; fall through to fail-closed.
+          // Can't determine state either; fall through to conservative pending.
         }
-        // Fail closed for open PRs: report as failing rather than
-        // "none" (which getMergeability treats as passing).
-        return "failing";
+        return "pending";
       }
       if (checks.length === 0) return "none";
 

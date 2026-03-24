@@ -724,9 +724,16 @@ describe("scm-github plugin", () => {
       expect(await scm.getCISummary(pr)).toBe("none");
     });
 
-    it('returns "failing" on error (fail-closed)', async () => {
+    it('returns "pending" on check fetch error for open PRs', async () => {
       mockGhError();
-      expect(await scm.getCISummary(pr)).toBe("failing");
+      mockGh({ state: "OPEN" });
+      expect(await scm.getCISummary(pr)).toBe("pending");
+    });
+
+    it('returns "none" on check fetch error for merged PRs', async () => {
+      mockGhError();
+      mockGh({ state: "MERGED" });
+      expect(await scm.getCISummary(pr)).toBe("none");
     });
 
     it('returns "none" when all checks are skipped', async () => {
@@ -1215,7 +1222,7 @@ describe("scm-github plugin", () => {
       const result = await scm.getMergeability(pr);
       expect(result.ciPassing).toBe(false);
       expect(result.mergeable).toBe(false);
-      expect(result.blockers).toContain("CI is failing");
+      expect(result.blockers).toContain("CI is pending");
       expect(result.blockers).toContain("Required checks are failing");
     });
 

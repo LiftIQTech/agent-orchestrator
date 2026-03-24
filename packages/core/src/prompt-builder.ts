@@ -1,10 +1,11 @@
 /**
  * Prompt Builder — composes layered prompts for agent sessions.
  *
- * Three layers:
+ * Prompt layers:
  *   1. BASE_AGENT_PROMPT — constant instructions about session lifecycle, git workflow, PR handling
  *   2. Config-derived context — project name, repo, default branch, tracker info, reaction rules
- *   3. User rules — inline agentRules and/or agentRulesFile content
+ *   3. Shared project rules — inline agentRules and/or agentRulesFile content
+ *   4. Worker-specific rules — inline workerRules and/or workerRulesFile content
  *
  * buildPrompt() always returns the AO base guidance and project context so
  * bare launches still know about AO-specific commands such as PR claiming.
@@ -115,26 +116,49 @@ function buildConfigLayer(config: PromptBuildConfig): string {
 }
 
 // =============================================================================
-// LAYER 3: USER RULES
+// LAYER 3: RULES
 // =============================================================================
 
-function readUserRules(project: ProjectConfig): string | null {
+function readRulesFile(project: ProjectConfig, relativePath?: string): string | null {
+  if (!relativePath) {
+    return null;
+  }
+
+  const filePath = resolve(project.path, relativePath);
+  try {
+    const content = readFileSync(filePath, "utf-8").trim();
+    return content || null;
+  } catch {
+    // File not found or unreadable — skip silently (don't crash the spawn)
+    return null;
+  }
+}
+
+function readSharedRules(project: ProjectConfig): string | null {
   const parts: string[] = [];
 
   if (project.agentRules) {
     parts.push(project.agentRules);
   }
 
-  if (project.agentRulesFile) {
-    const filePath = resolve(project.path, project.agentRulesFile);
-    try {
-      const content = readFileSync(filePath, "utf-8").trim();
-      if (content) {
-        parts.push(content);
-      }
-    } catch {
-      // File not found or unreadable — skip silently (don't crash the spawn)
-    }
+  const fileRules = readRulesFile(project, project.agentRulesFile);
+  if (fileRules) {
+    parts.push(fileRules);
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+function readWorkerRules(project: ProjectConfig): string | null {
+  const parts: string[] = [];
+
+  if (project.workerRules) {
+    parts.push(project.workerRules);
+  }
+
+  const fileRules = readRulesFile(project, project.workerRulesFile);
+  if (fileRules) {
+    parts.push(fileRules);
   }
 
   return parts.length > 0 ? parts.join("\n\n") : null;
@@ -148,10 +172,11 @@ function readUserRules(project: ProjectConfig): string | null {
  * Compose a layered prompt for an agent session.
  *
  * Always returns the AO base guidance plus project context, then layers on
- * issue context, user rules, and explicit instructions when available.
+ * issue context, shared rules, worker rules, and explicit instructions when available.
  */
 export function buildPrompt(config: PromptBuildConfig): string {
-  const userRules = readUserRules(config.project);
+  const sharedRules = readSharedRules(config.project);
+  const workerRules = readWorkerRules(config.project);
   const sections: string[] = [];
 
   // Layer 1: Base prompt is always included for every managed session.
@@ -160,12 +185,17 @@ export function buildPrompt(config: PromptBuildConfig): string {
   // Layer 2: Config-derived context
   sections.push(buildConfigLayer(config));
 
-  // Layer 3: User rules
-  if (userRules) {
-    sections.push(`## Project Rules\n${userRules}`);
+  // Layer 3: Shared project rules
+  if (sharedRules) {
+    sections.push(`## Project Rules\n${sharedRules}`);
   }
 
-  // Layer 4: Decomposition context (lineage + siblings)
+  // Layer 4: Worker-specific quality guidance
+  if (workerRules) {
+    sections.push(`## Worker Quality Rules\n${workerRules}`);
+  }
+
+  // Layer 5: Decomposition context (lineage + siblings)
   if (config.lineage && config.lineage.length > 0) {
     const hierarchy = config.lineage.map((desc, i) => `${"  ".repeat(i)}${i}. ${desc}`);
     // Add current task marker using issueId or last lineage entry

@@ -985,6 +985,12 @@ export interface ProjectConfig {
   /** Path to a file containing agent rules (relative to project path) */
   agentRulesFile?: string;
 
+  /** Inline rules passed only to worker prompts */
+  workerRules?: string;
+
+  /** Path to a file containing worker-only rules (relative to project path) */
+  workerRulesFile?: string;
+
   /** Rules for the orchestrator agent (stored, reserved for future use) */
   orchestratorRules?: string;
 

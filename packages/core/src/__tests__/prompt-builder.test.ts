@@ -117,6 +117,59 @@ describe("buildPrompt", () => {
     expect(result).toContain("File rule.");
   });
 
+  it("includes inline workerRules in a separate section", () => {
+    project.workerRules = "Run targeted validation before finishing.";
+    const result = buildPrompt({
+      project,
+      projectId: "test-app",
+      issueId: "INT-1343",
+    });
+    expect(result).toContain("## Worker Quality Rules");
+    expect(result).toContain("Run targeted validation before finishing.");
+  });
+
+  it("reads workerRulesFile content", () => {
+    const rulesPath = join(tmpDir, "worker-rules.md");
+    writeFileSync(rulesPath, "Inspect interface contracts before coding.");
+    project.workerRulesFile = "worker-rules.md";
+
+    const result = buildPrompt({
+      project,
+      projectId: "test-app",
+      issueId: "INT-1343",
+    });
+    expect(result).toContain("Inspect interface contracts before coding.");
+  });
+
+  it("includes both shared and worker-specific rules", () => {
+    project.agentRules = "Use conventional commits.";
+    project.workerRules = "Run targeted validation before finishing.";
+
+    const result = buildPrompt({
+      project,
+      projectId: "test-app",
+      issueId: "INT-1343",
+    });
+
+    expect(result).toContain("## Project Rules");
+    expect(result).toContain("## Worker Quality Rules");
+    expect(result).toContain("Use conventional commits.");
+    expect(result).toContain("Run targeted validation before finishing.");
+  });
+
+  it("handles missing workerRulesFile gracefully", () => {
+    project.workerRulesFile = "missing-worker-rules.md";
+
+    const result = buildPrompt({
+      project,
+      projectId: "test-app",
+      issueId: "INT-1343",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).not.toContain("## Worker Quality Rules");
+  });
+
   it("handles missing agentRulesFile gracefully", () => {
     project.agentRulesFile = "nonexistent-rules.md";
 
@@ -132,6 +185,7 @@ describe("buildPrompt", () => {
 
   it("appends userPrompt last", () => {
     project.agentRules = "Project rule.";
+    project.workerRules = "Worker rule.";
     const result = buildPrompt({
       project,
       projectId: "test-app",
@@ -144,8 +198,10 @@ describe("buildPrompt", () => {
 
     // User prompt should come after project rules
     const rulesIdx = promptStr.indexOf("Project rule.");
+    const workerIdx = promptStr.indexOf("Worker rule.");
     const userIdx = promptStr.indexOf("Focus on the API layer only.");
     expect(rulesIdx).toBeLessThan(userIdx);
+    expect(workerIdx).toBeLessThan(userIdx);
     expect(promptStr).toContain("## Additional Instructions");
   });
 
